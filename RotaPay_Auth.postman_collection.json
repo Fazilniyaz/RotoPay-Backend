@@ -1,0 +1,582 @@
+{
+  "info": {
+    "name": "RotaPay API — Auth Module",
+    "description": "Complete test collection for RotaPay authentication endpoints.\n\n**Setup:**\n1. Import this file into Postman\n2. Set the `baseUrl` variable to `http://localhost:5000`\n3. Run the requests in order (Register → Verify Email → Login)\n\n**Variables auto-set by tests:**\n- `accessToken` — set after login\n- `refreshToken` — set after login\n- `verifyToken` — copy from your email or DB",
+    "_postman_id": "rotapay-auth-collection",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "verifyToken",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "🏥 Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["health"]
+        },
+        "description": "Verify the server is running before testing auth endpoints."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Server is running', () => {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().success).to.be.true;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "1️⃣ Register — Success",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"testuser@example.com\",\n  \"password\": \"TestPass123\",\n  \"displayName\": \"Test User\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/register",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "register"]
+        },
+        "description": "**Expected:** 201 Created\n\nCreates a new account. An email is sent to `testuser@example.com` with the verification link.\n\n**Note:** Check the server console for the verification token in development mode, or check your email inbox."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Register returns 201', () => {",
+              "  pm.response.to.have.status(201);",
+              "});",
+              "pm.test('Response has user data', () => {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.success).to.be.true;",
+              "  pm.expect(body.data.user.email).to.equal('testuser@example.com');",
+              "  pm.expect(body.data.user).to.not.have.property('password');",
+              "  pm.expect(body.data.user.emailVerified).to.be.false;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "1️⃣ Register — Validation Error (weak password)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"testuser@example.com\",\n  \"password\": \"weak\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/register",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "register"]
+        },
+        "description": "**Expected:** 422 Unprocessable Entity\n\nPassword is too short and doesn't meet complexity requirements."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Returns 422 for weak password', () => {",
+              "  pm.response.to.have.status(422);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.success).to.be.false;",
+              "  pm.expect(body.errors).to.have.property('password');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "1️⃣ Register — Validation Error (invalid email)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"not-an-email\",\n  \"password\": \"TestPass123\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/register",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "register"]
+        },
+        "description": "**Expected:** 422 Unprocessable Entity"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Returns 422 for invalid email', () => {",
+              "  pm.response.to.have.status(422);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.errors).to.have.property('email');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "1️⃣ Register — Duplicate Email",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"testuser@example.com\",\n  \"password\": \"TestPass123\",\n  \"displayName\": \"Test User\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/register",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "register"]
+        },
+        "description": "**Expected:** 409 Conflict\n\nRun this AFTER the successful register to confirm duplicate detection."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Returns 409 for duplicate email', () => {",
+              "  pm.response.to.have.status(409);",
+              "  pm.expect(pm.response.json().success).to.be.false;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4️⃣ Verify Email — Success",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"token\": \"PASTE_TOKEN_FROM_EMAIL_OR_DB_HERE\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/verify-email",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "verify-email"]
+        },
+        "description": "**Expected:** 200 OK\n\n**How to get the token:**\n- Check your email inbox for the verification link\n- Or query MongoDB: `db.users.findOne({email:'testuser@example.com'}, {emailVerifyToken:1})`\n- Or check server logs (the token is logged in development mode)\n\nThe token looks like: `a3f7e2d1b4c9...` (64 hex characters)"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Email verified successfully', () => {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().success).to.be.true;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4️⃣ Verify Email — Invalid Token",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"token\": \"invalid_or_fake_token_0000000000\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/verify-email",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "verify-email"]
+        },
+        "description": "**Expected:** 400 Bad Request"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Returns 400 for invalid token', () => {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.json().success).to.be.false;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5️⃣ Resend Verification — Success",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"testuser@example.com\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/resend-verification",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "resend-verification"]
+        },
+        "description": "**Expected:** 200 OK\n\nUse this before verifying to test the resend flow. A new token will be generated and emailed."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Resend returns 200', () => {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().success).to.be.true;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5️⃣ Resend Verification — Non-existent Email",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"doesnotexist@example.com\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/resend-verification",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "resend-verification"]
+        },
+        "description": "**Expected:** 200 OK (intentionally generic — prevents email enumeration)\n\nEven if the email doesn't exist, we return a success message so attackers can't probe for valid emails."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Returns 200 even for non-existent email (anti-enumeration)', () => {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().success).to.be.true;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2️⃣ Login — Success",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"testuser@example.com\",\n  \"password\": \"TestPass123\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/login",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "login"]
+        },
+        "description": "**Expected:** 200 OK\n\n**Run this AFTER verifying your email.** Returns access and refresh tokens.\n\nTokens are auto-saved to the collection variables `accessToken` and `refreshToken`."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Login returns 200', () => {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "pm.test('Response has tokens', () => {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.success).to.be.true;",
+              "  pm.expect(body.data).to.have.property('accessToken');",
+              "  pm.expect(body.data).to.have.property('refreshToken');",
+              "  pm.expect(body.data.user.emailVerified).to.be.true;",
+              "  // Auto-save tokens for other requests",
+              "  pm.collectionVariables.set('accessToken', body.data.accessToken);",
+              "  pm.collectionVariables.set('refreshToken', body.data.refreshToken);",
+              "  console.log('✅ Tokens saved to collection variables');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2️⃣ Login — Wrong Password",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"testuser@example.com\",\n  \"password\": \"WrongPassword999\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/login",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "login"]
+        },
+        "description": "**Expected:** 401 Unauthorised\n\nNote the generic error message — doesn't reveal whether the email or password was wrong."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Returns 401 for wrong password', () => {",
+              "  pm.response.to.have.status(401);",
+              "  pm.expect(pm.response.json().success).to.be.false;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2️⃣ Login — Unverified Email",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"unverified@example.com\",\n  \"password\": \"TestPass123\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/login",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "login"]
+        },
+        "description": "**Expected:** 403 Forbidden\n\nFirst register this email WITHOUT verifying it, then try to login.\n\nRegister body:\n```json\n{\"email\":\"unverified@example.com\",\"password\":\"TestPass123\"}\n```"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Returns 403 for unverified email', () => {",
+              "  pm.response.to.have.status(403);",
+              "  pm.expect(pm.response.json().success).to.be.false;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2️⃣ Login — Missing Fields",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"testuser@example.com\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/login",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "login"]
+        },
+        "description": "**Expected:** 422 Unprocessable Entity — password is missing"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Returns 422 for missing password', () => {",
+              "  pm.response.to.have.status(422);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.errors).to.have.property('password');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3️⃣ Google Auth — Valid ID Token",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"idToken\": \"PASTE_REAL_GOOGLE_ID_TOKEN_HERE\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/google",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "google"]
+        },
+        "description": "**Expected:** 200 OK (existing user) or 201 Created (new user)\n\n**How to get a real Google ID token for testing:**\n1. In your frontend app, use `@react-oauth/google` or the Google Sign-In JS SDK\n2. On successful Google sign-in, you get an `idToken` (also called `credential`)\n3. Copy that token here\n\n**Quick test method (browser console):**\n```js\ngoogle.accounts.id.initialize({\n  client_id: 'YOUR_GOOGLE_CLIENT_ID',\n  callback: (res) => console.log(res.credential) // This is your idToken\n});\n```\n\n**Note:** ID tokens expire in ~1 hour. You need a fresh one each test session."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Google auth returns 200 or 201', () => {",
+              "  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+              "});",
+              "pm.test('Response has tokens', () => {",
+              "  const body = pm.response.json();",
+              "  if (body.success) {",
+              "    pm.collectionVariables.set('accessToken', body.data.accessToken);",
+              "    pm.collectionVariables.set('refreshToken', body.data.refreshToken);",
+              "    console.log('isNewUser:', body.data.isNewUser);",
+              "  }",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3️⃣ Google Auth — Invalid Token",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"idToken\": \"fake.google.token.that.will.fail.verification\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/google",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "auth", "google"]
+        },
+        "description": "**Expected:** 400 Bad Request"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Returns 400 for invalid Google token', () => {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.json().success).to.be.false;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔐 Protected Route Test (uses saved accessToken)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/users/me",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "users", "me"]
+        },
+        "description": "**Expected:** 404 (route not built yet) or 200 once user routes are built.\n\nThis tests that the saved `accessToken` is being sent correctly in the Authorization header.\n\nIf you get 401, your token may have expired (15 min expiry) — run Login again."
+      },
+      "response": []
+    }
+  ]
+}

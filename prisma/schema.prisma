@@ -1,0 +1,214 @@
+// ─────────────────────────────────────────────
+// RotaPay — Prisma Schema (MongoDB)
+// ─────────────────────────────────────────────
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ──────────────── USER ────────────────
+
+model User {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  email          String   @unique
+  password       String?
+  displayName    String?
+  profilePicture String?
+  emailVerified  Boolean  @default(false)
+  googleId       String?  @unique
+  pin            String?
+  pinEnabled     Boolean  @default(false)
+
+  // Email verification
+  emailVerifyToken        String?
+  emailVerifyTokenExpiry  DateTime?
+
+  // Password reset
+  passwordResetToken        String?
+  passwordResetTokenExpiry  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  settings      UserSettings?
+  employers     Employer[]
+  shifts        Shift[]
+  clockSessions ClockSession[]
+  events        Event[]
+  notifications Notification[]
+  sessions      Session[]
+
+  @@map("users")
+}
+
+// ──────────────── USER SETTINGS (1:1) ────────────────
+
+model UserSettings {
+  id                     String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId                 String   @unique @db.ObjectId
+  theme                  String   @default("light")
+  currency               String   @default("GBP")
+  salaryCalcMode         String   @default("automatic")
+  clockInOutEnabled      Boolean  @default(true)
+  language               String   @default("en")
+  dateFormat             String   @default("DD/MM/YYYY")
+  timeFormat             String   @default("24h")
+  notifyShiftReminder    Boolean  @default(true)
+  notifyEventReminder    Boolean  @default(true)
+  notifyBirthdayReminder Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+// ──────────────── EMPLOYER ────────────────
+
+model Employer {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId        String   @db.ObjectId
+  store         String
+  employerName  String
+  hourlyPayRate Float
+  currency      String   @default("GBP")
+  notes         String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shifts        Shift[]
+  clockSessions ClockSession[]
+
+  @@index([userId])
+  @@map("employers")
+}
+
+// ──────────────── SHIFT ────────────────
+
+model Shift {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId        String   @db.ObjectId
+  employerId    String   @db.ObjectId
+  date          DateTime
+  startTime     DateTime
+  endTime       DateTime
+  totalHours    Float
+  breakDuration Float    @default(0)
+  earnings      Float
+  isManualEntry Boolean  @default(false)
+  confirmed     Boolean  @default(false)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employer Employer @relation(fields: [employerId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([employerId])
+  @@index([userId, date])
+  @@index([userId, employerId, date])
+  @@map("shifts")
+}
+
+// ──────────────── CLOCK SESSION ────────────────
+
+model ClockSession {
+  id               String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId           String    @db.ObjectId
+  employerId       String    @db.ObjectId
+  clockInTime      DateTime
+  clockOutTime     DateTime?
+  totalHours       Float?
+  earnings         Float?
+  isAutoCalculated Boolean   @default(true)
+  status           String    @default("active")
+  notes            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employer Employer @relation(fields: [employerId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([employerId])
+  @@index([userId, status])
+  @@map("clock_sessions")
+}
+
+// ──────────────── EVENT ────────────────
+
+model Event {
+  id               String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId           String    @db.ObjectId
+  title            String
+  description      String?
+  type             String
+  date             DateTime
+  endDate          DateTime?
+  isAllDay         Boolean   @default(false)
+  isRecurring      Boolean   @default(false)
+  recurringPattern String?
+  reminderEnabled  Boolean   @default(false)
+  reminderMinutes  Int?
+  color            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, date])
+  @@index([userId, type])
+  @@map("events")
+}
+
+// ──────────────── NOTIFICATION ────────────────
+
+model Notification {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
+  type        String
+  title       String
+  message     String
+  isRead      Boolean  @default(false)
+  relatedId   String?  @db.ObjectId
+  relatedType String?
+  scheduledAt DateTime
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, isRead])
+  @@index([userId, scheduledAt])
+  @@map("notifications")
+}
+
+// ──────────────── SESSION ────────────────
+
+model Session {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String   @db.ObjectId
+  token        String   @unique
+  refreshToken String   @unique
+  expiresAt    DateTime
+  userAgent    String?
+  ipAddress    String?
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
