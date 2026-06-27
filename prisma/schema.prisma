@@ -20,7 +20,7 @@ model User {
   displayName    String?
   profilePicture String?
   emailVerified  Boolean  @default(false)
-  googleId       String?  @unique
+  googleId       String?
   pin            String?
   pinEnabled     Boolean  @default(false)
 
