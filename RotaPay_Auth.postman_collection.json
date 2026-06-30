@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "RotaPay API — Auth Module",
-    "description": "Complete test collection for RotaPay authentication endpoints.\n\n**Setup:**\n1. Import this file into Postman\n2. Set the `baseUrl` variable to `http://localhost:5000`\n3. Run the requests in order (Register → Verify Email → Login)\n\n**Variables auto-set by tests:**\n- `accessToken` — set after login\n- `refreshToken` — set after login\n- `verifyToken` — copy from your email or DB",
+    "name": "RotaPay API — Auth, Employers, Shifts, Salaries, Clock & Calendar",
+    "description": "Test collection for RotaPay.\n\nRun order: Register → Verify → Login (saves accessToken) → Employer Create (employerId) → Shift Create (shiftId) → Salary Create (salaryId) → reads/updates → Salary Delete → Shift Delete → Employer Delete.\n\nModel: Shift and Employer are independent; a **Salary** row links them and holds the pay value. Deleting a shift/employer keeps salary rows (the id just becomes null).\n\nAuto-set vars: accessToken, refreshToken, employerId, shiftId, salaryId.",
     "_postman_id": "rotapay-auth-collection",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -25,6 +25,31 @@
       "key": "verifyToken",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "employerId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "shiftId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "salaryId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "clockSessionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "calendarId",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -35,8 +60,12 @@
         "header": [],
         "url": {
           "raw": "{{baseUrl}}/health",
-          "host": ["{{baseUrl}}"],
-          "path": ["health"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "health"
+          ]
         },
         "description": "Verify the server is running before testing auth endpoints."
       },
@@ -61,7 +90,10 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -69,8 +101,14 @@
         },
         "url": {
           "raw": "{{baseUrl}}/api/auth/register",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "auth", "register"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "register"
+          ]
         },
         "description": "**Expected:** 201 Created\n\nCreates a new account. An email is sent to `testuser@example.com` with the verification link.\n\n**Note:** Check the server console for the verification token in development mode, or check your email inbox."
       },
@@ -101,7 +139,10 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -109,8 +150,14 @@
         },
         "url": {
           "raw": "{{baseUrl}}/api/auth/register",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "auth", "register"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "register"
+          ]
         },
         "description": "**Expected:** 422 Unprocessable Entity\n\nPassword is too short and doesn't meet complexity requirements."
       },
@@ -137,7 +184,10 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -145,8 +195,14 @@
         },
         "url": {
           "raw": "{{baseUrl}}/api/auth/register",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "auth", "register"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "register"
+          ]
         },
         "description": "**Expected:** 422 Unprocessable Entity"
       },
@@ -172,7 +228,10 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -180,8 +239,14 @@
         },
         "url": {
           "raw": "{{baseUrl}}/api/auth/register",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "auth", "register"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "register"
+          ]
         },
         "description": "**Expected:** 409 Conflict\n\nRun this AFTER the successful register to confirm duplicate detection."
       },
@@ -206,7 +271,10 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -214,8 +282,14 @@
         },
         "url": {
           "raw": "{{baseUrl}}/api/auth/verify-email",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "auth", "verify-email"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "verify-email"
+          ]
         },
         "description": "**Expected:** 200 OK\n\n**How to get the token:**\n- Check your email inbox for the verification link\n- Or query MongoDB: `db.users.findOne({email:'testuser@example.com'}, {emailVerifyToken:1})`\n- Or check server logs (the token is logged in development mode)\n\nThe token looks like: `a3f7e2d1b4c9...` (64 hex characters)"
       },
@@ -240,7 +314,10 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -248,8 +325,14 @@
         },
         "url": {
           "raw": "{{baseUrl}}/api/auth/verify-email",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "auth", "verify-email"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "verify-email"
+          ]
         },
         "description": "**Expected:** 400 Bad Request"
       },
@@ -274,7 +357,10 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -282,8 +368,14 @@
         },
         "url": {
           "raw": "{{baseUrl}}/api/auth/resend-verification",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "auth", "resend-verification"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "resend-verification"
+          ]
         },
         "description": "**Expected:** 200 OK\n\nUse this before verifying to test the resend flow. A new token will be generated and emailed."
       },
@@ -308,7 +400,10 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -316,8 +411,14 @@
         },
         "url": {
           "raw": "{{baseUrl}}/api/auth/resend-verification",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "auth", "resend-verification"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "resend-verification"
+          ]
         },
         "description": "**Expected:** 200 OK (intentionally generic — prevents email enumeration)\n\nEven if the email doesn't exist, we return a success message so attackers can't probe for valid emails."
       },
@@ -342,7 +443,10 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -350,8 +454,14 @@
         },
         "url": {
           "raw": "{{baseUrl}}/api/auth/login",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "auth", "login"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "login"
+          ]
         },
         "description": "**Expected:** 200 OK\n\n**Run this AFTER verifying your email.** Returns access and refresh tokens.\n\nTokens are auto-saved to the collection variables `accessToken` and `refreshToken`."
       },
@@ -386,7 +496,10 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -394,8 +507,14 @@
         },
         "url": {
           "raw": "{{baseUrl}}/api/auth/login",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "auth", "login"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "login"
+          ]
         },
         "description": "**Expected:** 401 Unauthorised\n\nNote the generic error message — doesn't reveal whether the email or password was wrong."
       },
@@ -420,7 +539,10 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -428,8 +550,14 @@
         },
         "url": {
           "raw": "{{baseUrl}}/api/auth/login",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "auth", "login"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "login"
+          ]
         },
         "description": "**Expected:** 403 Forbidden\n\nFirst register this email WITHOUT verifying it, then try to login.\n\nRegister body:\n```json\n{\"email\":\"unverified@example.com\",\"password\":\"TestPass123\"}\n```"
       },
@@ -454,7 +582,10 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -462,8 +593,14 @@
         },
         "url": {
           "raw": "{{baseUrl}}/api/auth/login",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "auth", "login"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "login"
+          ]
         },
         "description": "**Expected:** 422 Unprocessable Entity — password is missing"
       },
@@ -489,7 +626,10 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -497,8 +637,14 @@
         },
         "url": {
           "raw": "{{baseUrl}}/api/auth/google",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "auth", "google"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "google"
+          ]
         },
         "description": "**Expected:** 200 OK (existing user) or 201 Created (new user)\n\n**How to get a real Google ID token for testing:**\n1. In your frontend app, use `@react-oauth/google` or the Google Sign-In JS SDK\n2. On successful Google sign-in, you get an `idToken` (also called `credential`)\n3. Copy that token here\n\n**Quick test method (browser console):**\n```js\ngoogle.accounts.id.initialize({\n  client_id: 'YOUR_GOOGLE_CLIENT_ID',\n  callback: (res) => console.log(res.credential) // This is your idToken\n});\n```\n\n**Note:** ID tokens expire in ~1 hour. You need a fresh one each test session."
       },
@@ -530,7 +676,10 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -538,8 +687,14 @@
         },
         "url": {
           "raw": "{{baseUrl}}/api/auth/google",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "auth", "google"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "google"
+          ]
         },
         "description": "**Expected:** 400 Bad Request"
       },
@@ -571,12 +726,1470 @@
         ],
         "url": {
           "raw": "{{baseUrl}}/api/users/me",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "users", "me"]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "users",
+            "me"
+          ]
         },
         "description": "**Expected:** 404 (route not built yet) or 200 once user routes are built.\n\nThis tests that the saved `accessToken` is being sent correctly in the Authorization header.\n\nIf you get 401, your token may have expired (15 min expiry) — run Login again."
       },
       "response": []
+    },
+    {
+      "name": "🏢 Employer — Create",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"store\": \"Tesco Express — High Street\",\n  \"employerName\": \"Tesco PLC\",\n  \"notes\": \"Weekend shifts mostly\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/employers",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "employers"
+          ]
+        },
+        "description": "**Expected:** 201. Creates an employer (a.k.a. \"employee\") for the user. Saves `{{employerId}}`."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Create employer 201', () => {",
+              "  pm.response.to.have.status(201);",
+              "  const b = pm.response.json();",
+              "  pm.expect(b.success).to.be.true;",
+              "  pm.collectionVariables.set('employerId', b.data.id);",
+              "  console.log('✅ employerId:', b.data.id);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "🏢 Employer — Create (No Token → 401)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"store\": \"X\",\n  \"employerName\": \"Y\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/employers",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "employers"
+          ]
+        },
+        "description": "**Expected:** 401 — no Authorization header."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('401 without token', () => { pm.response.to.have.status(401); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "🏢 Employer — Create (Validation Error → 422)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"store\": \"\",\n  \"employerName\": \"\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/employers",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "employers"
+          ]
+        },
+        "description": "**Expected:** 422 — empty store and employer name."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('422 invalid body', () => { pm.response.to.have.status(422); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "🏢 Employer — List",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/employers?page=1&limit=20",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "employers"
+          ],
+          "query": [
+            {
+              "key": "page",
+              "value": "1"
+            },
+            {
+              "key": "limit",
+              "value": "20"
+            }
+          ]
+        },
+        "description": "**Expected:** 200. Supports `?isActive=`, `?search=`, `?page=`, `?limit=`."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('List 200', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().data).to.be.an('array'); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "🏢 Employer — Get By Id",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/employers/{{employerId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "employers",
+            "{{employerId}}"
+          ]
+        },
+        "description": "**Expected:** 200."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Get 200', () => { pm.response.to.have.status(200); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "🏢 Employer — Update",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"employerName\": \"Tesco Stores Ltd\",\n  \"notes\": \"Renamed\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/employers/{{employerId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "employers",
+            "{{employerId}}"
+          ]
+        },
+        "description": "**Expected:** 200. Partial update."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Update 200', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().data.employerName).to.eql('Tesco Stores Ltd'); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "🕒 Shift — Create",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"shiftName\": \"Morning Floor\",\n  \"startDate\": \"2025-07-01T00:00:00.000Z\",\n  \"endDate\": \"2025-07-31T00:00:00.000Z\",\n  \"startTime\": \"2025-07-01T09:00:00.000Z\",\n  \"endTime\": \"2025-07-01T17:00:00.000Z\",\n  \"totalHours\": 7.5,\n  \"breakDuration\": 30,\n  \"shiftType\": \"day\",\n  \"confirmed\": false,\n  \"notes\": \"Morning shift\",\n  \"salaries\": [\n    {\n      \"employerId\": \"{{employerId}}\",\n      \"salary\": 120\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/shifts",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "shifts"
+          ]
+        },
+        "description": "**Expected:** 201. Uses startDate/endDate (status + isActive are auto-derived from them). totalHours is client-computed. Optional salaries[] assigns employers. Saves {{shiftId}}."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Create shift 201', () => {",
+              "  pm.response.to.have.status(201);",
+              "  const b = pm.response.json();",
+              "  pm.expect(b.data.salaries).to.be.an(\"array\");",
+              "  pm.expect(b.data, 'has status').to.have.property('status');",
+              "  pm.expect(b.data, 'has isActive').to.have.property('isActive');",
+              "  pm.collectionVariables.set('shiftId', b.data.id);",
+              "  console.log('✅ shiftId:', b.data.id, '| status:', b.data.status);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "🕒 Shift — Create (End before Start → 422)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"startDate\": \"2025-07-01T00:00:00.000Z\",\n  \"endDate\": \"2025-07-31T00:00:00.000Z\",\n  \"startTime\": \"2025-07-01T17:00:00.000Z\",\n  \"endTime\": \"2025-07-01T09:00:00.000Z\",\n  \"totalHours\": 7.5,\n  \"shiftType\": \"day\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/shifts",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "shifts"
+          ]
+        },
+        "description": "**Expected:** 422 — endTime before startTime."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('422 bad time order', () => { pm.response.to.have.status(422); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "🕒 Shift — Create (Unknown Employer → 404)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"startDate\": \"2025-07-01T00:00:00.000Z\",\n  \"endDate\": \"2025-07-31T00:00:00.000Z\",\n  \"startTime\": \"2025-07-01T09:00:00.000Z\",\n  \"endTime\": \"2025-07-01T17:00:00.000Z\",\n  \"totalHours\": 8,\n  \"shiftType\": \"night\",\n  \"salaries\": [\n    {\n      \"employerId\": \"0123456789abcdef01234567\",\n      \"salary\": 100\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/shifts",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "shifts"
+          ]
+        },
+        "description": "**Expected:** 404 — a salary assignment references an employer the user doesn't own."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('404 unknown employer', () => { pm.response.to.have.status(404); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "🕒 Shift — List",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/shifts?page=1&limit=20",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "shifts"
+          ],
+          "query": [
+            {
+              "key": "page",
+              "value": "1"
+            },
+            {
+              "key": "limit",
+              "value": "20"
+            }
+          ]
+        },
+        "description": "**Expected:** 200. Filters: ?status=upcoming|isActive|completed, ?search= (notes), ?employerId=, ?shiftType=, ?from=/?to= (startDate), ?confirmed=. meta.summary has total hours."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('List shifts 200', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().meta).to.have.property('summary'); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "🕒 Shift — Filter & Search",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/shifts?status=isActive&search=morning&page=1&limit=20",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "shifts"
+          ],
+          "query": [
+            {
+              "key": "status",
+              "value": "isActive"
+            },
+            {
+              "key": "search",
+              "value": "morning"
+            },
+            {
+              "key": "page",
+              "value": "1"
+            },
+            {
+              "key": "limit",
+              "value": "20"
+            }
+          ]
+        },
+        "description": "**Expected:** 200. Demonstrates status filtering (upcoming|isActive|completed) + notes search. status is translated to date conditions server-side."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Filtered shifts 200', () => {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().data).to.be.an(\"array\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "🕒 Shift — Analytics",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/shifts/analytics",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "shifts",
+            "analytics"
+          ]
+        },
+        "description": "**Expected:** 200. Totals for the shift dashboard cards: totalHours, thisMonthHours, thisWeekHours, totalPay, thisMonthPay, thisWeekPay. Pay is summed from linked Salary rows by shift date."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Shift analytics 200', () => {",
+              "  pm.response.to.have.status(200);",
+              "  const d = pm.response.json().data;",
+              "  ['totalHours','thisMonthPay','thisWeekPay','totalPay'].forEach(k => pm.expect(d).to.have.property(k));",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "🕒 Shift — Get By Id",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/shifts/{{shiftId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "shifts",
+            "{{shiftId}}"
+          ]
+        },
+        "description": "**Expected:** 200 — includes the shift's `salaries` array."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Get shift 200', () => { pm.response.to.have.status(200); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "🕒 Shift — Update",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"shiftName\": \"Evening Floor\",\n  \"confirmed\": true,\n  \"shiftType\": \"night\",\n  \"totalHours\": 7\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/shifts/{{shiftId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "shifts",
+            "{{shiftId}}"
+          ]
+        },
+        "description": "**Expected:** 200. Updates shift fields only (salary rows are managed via /api/salaries)."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Update shift 200', () => {",
+              "  pm.response.to.have.status(200);",
+              "  const b = pm.response.json();",
+              "  pm.expect(b.data.confirmed).to.be.true;",
+              "  pm.expect(b.data.shiftType).to.eql('night');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "💰 Salary — Create",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"shiftId\": \"{{shiftId}}\",\n  \"employerId\": \"{{employerId}}\",\n  \"salary\": 150\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/salaries",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "salaries"
+          ]
+        },
+        "description": "**Expected:** 201. Links a shift + employer with a pay value. Saves `{{salaryId}}`."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Create salary 201 + hourlyPayRate', () => {",
+              "  pm.response.to.have.status(201);",
+              "  const b = pm.response.json();",
+              "  pm.expect(b.data.salary).to.eql(150);",
+              "  pm.expect(b.data, 'has hourlyPayRate').to.have.property('hourlyPayRate');",
+              "  pm.collectionVariables.set('salaryId', b.data.id);",
+              "  console.log('✅ salaryId:', b.data.id, '| rate:', b.data.hourlyPayRate);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "💰 Salary — Create (Validation Error → 422)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"shiftId\": \"{{shiftId}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/salaries",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "salaries"
+          ]
+        },
+        "description": "**Expected:** 422 — `salary` value is required."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('422 missing value', () => { pm.response.to.have.status(422); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "💰 Salary — List",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/salaries?page=1&limit=20",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "salaries"
+          ],
+          "query": [
+            {
+              "key": "page",
+              "value": "1"
+            },
+            {
+              "key": "limit",
+              "value": "20"
+            }
+          ]
+        },
+        "description": "**Expected:** 200. Supports `?shiftId=`, `?employerId=`. `meta.summary.totalSalary` sums the values."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('List salaries 200', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().meta.summary).to.have.property('totalSalary'); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "💰 Salary — Get By Id",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/salaries/{{salaryId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "salaries",
+            "{{salaryId}}"
+          ]
+        },
+        "description": "**Expected:** 200."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Get salary 200', () => { pm.response.to.have.status(200); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "⏱️ Clock — Clock In",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/clock/in",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "clock",
+            "in"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"salaryId\": \"{{salaryId}}\"\n}"
+        },
+        "description": "**Expected:** 201. Starts a session referencing the salary (employer + shift + rate). 409 if already clocked in."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Clock in 201', () => {",
+              "  pm.response.to.have.status(201);",
+              "  const b=pm.response.json();",
+              "  pm.expect(b.data.status).to.eql('active');",
+              "  pm.collectionVariables.set('clockSessionId', b.data.id);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "⏱️ Clock — Active",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/clock/active",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "clock",
+            "active"
+          ]
+        },
+        "description": "**Expected:** 200. Returns an ARRAY of all currently-active sessions."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Active 200 (array)', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().data).to.be.an('array'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "⏱️ Clock — Clock Out",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/clock/{{clockSessionId}}/out",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "clock",
+            "{{clockSessionId}}",
+            "out"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        },
+        "description": "**Expected:** 200. Clocks out THIS session (by id). Earnings = clocked hours × salary.hourlyPayRate. Multiple employees can be clocked in at once."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Clock out 200 + earnings', () => {",
+              "  pm.response.to.have.status(200);",
+              "  const b=pm.response.json();",
+              "  pm.expect(b.data.status).to.eql('completed');",
+              "  pm.expect(b.data,'has earnings').to.have.property('earnings');",
+              "  console.log('✅ earnings:', b.data.earnings, '| hours:', b.data.totalHours);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "⏱️ Clock — List",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/clock",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "clock"
+          ]
+        },
+        "description": "**Expected:** 200. Session history with totals."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Clock list 200', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().meta.summary).to.have.property('totalEarnings'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "⏱️ Clock — Delete",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/clock/{{clockSessionId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "clock",
+            "{{clockSessionId}}"
+          ]
+        },
+        "description": "**Expected:** 200."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Clock delete 200', () => { pm.response.to.have.status(200); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "📅 Calendar — Create",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/calendar",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "calendar"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"date\": \"2025-07-15T00:00:00.000Z\",\n  \"title\": \"Gym session\",\n  \"shiftId\": \"{{shiftId}}\"\n}"
+        },
+        "description": "**Expected:** 201. Custom day note (≤15 words), optionally linked to a shift. Saves {{calendarId}}."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Create entry 201', () => {",
+              "  pm.response.to.have.status(201);",
+              "  pm.collectionVariables.set('calendarId', pm.response.json().data.id);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "📅 Calendar — Create (Too Many Words → 422)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/calendar",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "calendar"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"date\": \"2025-07-15T00:00:00.000Z\",\n  \"title\": \"one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen\"\n}"
+        },
+        "description": "**Expected:** 422 — title exceeds 15 words."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('422 over 15 words', () => { pm.response.to.have.status(422); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "📅 Calendar — List",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/calendar?from=2025-07-01&to=2025-07-31",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "calendar"
+          ],
+          "query": [
+            {
+              "key": "from",
+              "value": "2025-07-01"
+            },
+            {
+              "key": "to",
+              "value": "2025-07-31"
+            }
+          ]
+        },
+        "description": "**Expected:** 200. Entries within the ?from=/?to= range."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('List 200', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().data).to.be.an('array'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "📅 Calendar — Get By Id",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/calendar/{{calendarId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "calendar",
+            "{{calendarId}}"
+          ]
+        },
+        "description": "**Expected:** 200."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Get 200', () => { pm.response.to.have.status(200); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "📅 Calendar — Update",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/calendar/{{calendarId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "calendar",
+            "{{calendarId}}"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Holiday\"\n}"
+        },
+        "description": "**Expected:** 200."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Update 200', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().data.title).to.eql('Holiday'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "📅 Calendar — Delete",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/calendar/{{calendarId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "calendar",
+            "{{calendarId}}"
+          ]
+        },
+        "description": "**Expected:** 200."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Delete 200', () => { pm.response.to.have.status(200); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "💰 Salary — Update",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"salary\": 175\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/salaries/{{salaryId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "salaries",
+            "{{salaryId}}"
+          ]
+        },
+        "description": "**Expected:** 200. Can change `salary`, or re-link/detach `shiftId`/`employerId` (send null to detach)."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Update salary 200', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().data.salary).to.eql(175); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "💰 Salary — Detach Links (null)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"shiftId\": null,\n  \"employerId\": null\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/salaries/{{salaryId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "salaries",
+            "{{salaryId}}"
+          ]
+        },
+        "description": "**Expected:** 200. Sending null detaches the shift/employer link while KEEPING the salary row and its value (the SetNull behaviour)."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Detach salary links 200', () => {",
+              "  pm.response.to.have.status(200);",
+              "  const b = pm.response.json();",
+              "  pm.expect(b.data.shiftId, \"shiftId cleared\").to.be.null;",
+              "  pm.expect(b.data.employerId, \"employerId cleared\").to.be.null;",
+              "  pm.expect(b.data.salary, \"value preserved\").to.eql(175);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "💰 Salary — Delete",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/salaries/{{salaryId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "salaries",
+            "{{salaryId}}"
+          ]
+        },
+        "description": "**Expected:** 200."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Delete salary 200', () => { pm.response.to.have.status(200); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "🕒 Shift — Delete",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/shifts/{{shiftId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "shifts",
+            "{{shiftId}}"
+          ]
+        },
+        "description": "**Expected:** 200. Salary rows are KEPT (their shiftId becomes null)."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Delete shift 200', () => { pm.response.to.have.status(200); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "🏢 Employer — Delete",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/employers/{{employerId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "employers",
+            "{{employerId}}"
+          ]
+        },
+        "description": "**Expected:** 200. Shifts are untouched; salary rows are KEPT (employerId becomes null)."
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Delete employer 200', () => { pm.response.to.have.status(200); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
     }
   ]
 }

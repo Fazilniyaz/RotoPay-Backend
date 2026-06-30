@@ -14,6 +14,12 @@ import { errorHandler, notFoundHandler } from "./middlewares/error.middleware";
 
 // ── Import Routers ─────────────────────────────
 import authRouter from "./routes/auth.router";
+import employerRouter from "./routes/employer.router";
+import shiftRouter from "./routes/shift.router";
+import salaryRouter from "./routes/salary.router";
+import clockRouter from "./routes/clock.router";
+import calendarRouter from "./routes/calendar.router";
+import settingsRouter from "./routes/settings.router";
 
 // ─────────────────────────────────────────────
 
@@ -25,7 +31,8 @@ app.use(helmet());
 // ── CORS ───────────────────────────────────────
 app.use(
   cors({
-    origin: env.CLIENT_URL,
+    origin
+        : [env.CLIENT_URL, "http://localhost:8081", "http://192.168.0.102:8081", "http://localhost:3000"],
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -56,12 +63,15 @@ app.get("/health", (_req, res) => {
 
 // ── API Routes ─────────────────────────────────
 app.use("/api/auth", authRouter);
+app.use("/api/employers", employerRouter);
+app.use("/api/shifts", shiftRouter);
+app.use("/api/salaries", salaryRouter);
+app.use("/api/clock", clockRouter);
+app.use("/api/calendar", calendarRouter);
+app.use("/api/settings", settingsRouter);
 
 // Future routes will be added here:
 // app.use("/api/users", userRouter);
-// app.use("/api/employers", employerRouter);
-// app.use("/api/shifts", shiftRouter);
-// app.use("/api/clock", clockRouter);
 // app.use("/api/events", eventRouter);
 // app.use("/api/notifications", notificationRouter);
 // app.use("/api/dashboard", dashboardRouter);

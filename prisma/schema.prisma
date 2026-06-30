@@ -36,13 +36,15 @@ model User {
   updatedAt DateTime @updatedAt
 
   // Relations
-  settings      UserSettings?
-  employers     Employer[]
-  shifts        Shift[]
-  clockSessions ClockSession[]
-  events        Event[]
-  notifications Notification[]
-  sessions      Session[]
+  settings        UserSettings?
+  employers       Employer[]
+  shifts          Shift[]
+  salaries        Salary[]
+  clockSessions   ClockSession[]
+  events          Event[]
+  calendarEntries CalendarEntry[]
+  notifications   Notification[]
+  sessions        Session[]
 
   @@map("users")
 }
@@ -77,15 +79,15 @@ model Employer {
   userId        String   @db.ObjectId
   store         String
   employerName  String
-  hourlyPayRate Float
-  currency      String   @default("GBP")
   notes         String?
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  shifts        Shift[]
+  // Employer and Shift are INDEPENDENT — they connect only through Salary.
+  // Deleting an employer sets salary.employerId to null (salary rows are kept).
+  salaries      Salary[]
   clockSessions ClockSession[]
 
   @@index([userId])
@@ -94,30 +96,102 @@ model Employer {
 
 // ──────────────── SHIFT ────────────────
 
+enum ShiftType {
+  night
+  day
+  rotational
+}
+
+// Lifecycle status, DERIVED from startDate/endDate vs the current date:
+//   now <  startDate            → upcoming  (isActive=false)
+//   startDate <= now <= endDate → isActive  (isActive=true)
+//   now >  endDate              → completed (isActive=false)
+// (Note: `isActive` is both the boolean field below and the middle status.)
+enum ShiftStatus {
+  upcoming
+  isActive
+  completed
+}
+
 model Shift {
-  id            String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId        String   @db.ObjectId
-  employerId    String   @db.ObjectId
-  date          DateTime
+  id            String       @id @default(auto()) @map("_id") @db.ObjectId
+  userId        String       @db.ObjectId
+  shiftName     String?
+  startDate     DateTime?
+  endDate       DateTime?
   startTime     DateTime
   endTime       DateTime
   totalHours    Float
-  breakDuration Float    @default(0)
-  earnings      Float
-  isManualEntry Boolean  @default(false)
-  confirmed     Boolean  @default(false)
+  breakDuration Float        @default(0)
+  shiftType     ShiftType?
+  status        ShiftStatus?
+  isActive      Boolean?
+  isManualEntry Boolean      @default(false)
+  confirmed     Boolean      @default(false)
   notes         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // A shift can have MANY salary rows — one per assigned employer/value.
+  // Deleting a shift sets salary.shiftId to null (salary rows are kept).
+  salaries        Salary[]
+  calendarEntries CalendarEntry[]
+
+  @@index([userId])
+  @@index([userId, startDate])
+  @@map("shifts")
+}
+
+// ──────────────── CALENDAR ENTRY ────────────────
+// A user-marked note on a calendar day (e.g. "Gym session", "Holiday").
+// `title` is free custom text (max 15 words). Optionally links to a Shift.
+
+model CalendarEntry {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  date      DateTime
+  title     String
+  shiftId   String?  @db.ObjectId
+  color     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shift Shift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([userId, date])
+  @@map("calendar_entries")
+}
+
+// ──────────────── SALARY ────────────────
+// Independent link entity — the ONLY thing connecting a Shift and an Employer.
+// Holds the pay value for one employer on one shift. A shift may have several
+// of these (multiple employers). shiftId / employerId are nullable and are set
+// to null (NOT cascaded) when the shift / employer is deleted, so the salary
+// record and its value are always preserved.
+
+model Salary {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId        String   @db.ObjectId
+  shiftId       String?  @db.ObjectId
+  employerId    String?  @db.ObjectId
+  salary        Float?
+  // Auto-derived = salary / shift.totalHours (computed server-side).
+  hourlyPayRate Float?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  employer Employer @relation(fields: [employerId], references: [id], onDelete: Cascade)
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shift         Shift?         @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  employer      Employer?      @relation(fields: [employerId], references: [id], onDelete: SetNull)
+  clockSessions ClockSession[]
 
   @@index([userId])
+  @@index([shiftId])
   @@index([employerId])
-  @@index([userId, date])
-  @@index([userId, employerId, date])
-  @@map("shifts")
+  @@map("salaries")
 }
 
 // ──────────────── CLOCK SESSION ────────────────
@@ -125,7 +199,9 @@ model Shift {
 model ClockSession {
   id               String    @id @default(auto()) @map("_id") @db.ObjectId
   userId           String    @db.ObjectId
-  employerId       String    @db.ObjectId
+  employerId       String?   @db.ObjectId
+  // Links to the Salary row → carries employer + shift details + hourly rate.
+  salaryId         String?   @db.ObjectId
   clockInTime      DateTime
   clockOutTime     DateTime?
   totalHours       Float?
@@ -136,11 +212,13 @@ model ClockSession {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  employer Employer @relation(fields: [employerId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employer Employer? @relation(fields: [employerId], references: [id], onDelete: SetNull)
+  salary   Salary?   @relation(fields: [salaryId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([employerId])
+  @@index([salaryId])
   @@index([userId, status])
   @@map("clock_sessions")
 }
