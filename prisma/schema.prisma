@@ -19,6 +19,9 @@ model User {
   password       String?
   displayName    String?
   profilePicture String?
+  // ImageKit fileId for the current profilePicture — needed to delete the
+  // previous image from ImageKit when the user changes their photo.
+  profilePictureId String?
   emailVerified  Boolean  @default(false)
   googleId       String?
   pin            String?
@@ -45,8 +48,53 @@ model User {
   calendarEntries CalendarEntry[]
   notifications   Notification[]
   sessions        Session[]
+  paidMonths      PaidMonth[]
+  reports         Report[]
 
   @@map("users")
+}
+
+// ──────────────── REPORT ────────────────
+// A generated export snapshot (shifts, wages, earnings, …) for a period.
+// Retention: only the last 3 months of reports are kept per user — older ones
+// are pruned whenever a new report is generated.
+
+model Report {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
+  months      Int // window length the report covers (1–3)
+  periodStart DateTime
+  periodEnd   DateTime
+  data        Json // computed snapshot (totals, shifts, wages, payments)
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, createdAt])
+  @@map("reports")
+}
+
+// ──────────────── PAID MONTH ────────────────
+// Records that the user has "received salary" for a given month. The `amount`
+// is a snapshot of the summed wage values of all shifts whose date falls in
+// that month, taken when the month is marked paid. Drives the shift module's
+// "This Month Pay" and "Total Pay" tabs.
+
+model PaidMonth {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  year      Int
+  month     Int // 1–12
+  amount    Float    @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, year, month])
+  @@index([userId])
+  @@map("paid_months")
 }
 
 // ──────────────── USER SETTINGS (1:1) ────────────────
@@ -55,7 +103,11 @@ model UserSettings {
   id                     String   @id @default(auto()) @map("_id") @db.ObjectId
   userId                 String   @unique @db.ObjectId
   theme                  String   @default("light")
+  // Global currency — used for money formatting across the whole app.
   currency               String   @default("GBP")
+  // Native/home currency — optional; when unset it falls back to `currency`.
+  // Only the shift module's "Native Pay" tab converts into this.
+  nativeCurrency         String?
   salaryCalcMode         String   @default("automatic")
   clockInOutEnabled      Boolean  @default(true)
   language               String   @default("en")
@@ -64,6 +116,9 @@ model UserSettings {
   notifyShiftReminder    Boolean  @default(true)
   notifyEventReminder    Boolean  @default(true)
   notifyBirthdayReminder Boolean  @default(true)
+  // How many months back a report export covers (1–3). Optional so existing
+  // settings docs don't break on read; defaults to 1 in the controller.
+  reportMonths           Int?
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
@@ -87,8 +142,9 @@ model Employer {
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   // Employer and Shift are INDEPENDENT — they connect only through Salary.
   // Deleting an employer sets salary.employerId to null (salary rows are kept).
-  salaries      Salary[]
-  clockSessions ClockSession[]
+  salaries        Salary[]
+  clockSessions   ClockSession[]
+  calendarEntries CalendarEntry[]
 
   @@index([userId])
   @@map("employers")
@@ -96,16 +152,10 @@ model Employer {
 
 // ──────────────── SHIFT ────────────────
 
-enum ShiftType {
-  night
-  day
-  rotational
-}
-
-// Lifecycle status, DERIVED from startDate/endDate vs the current date:
-//   now <  startDate            → upcoming  (isActive=false)
-//   startDate <= now <= endDate → isActive  (isActive=true)
-//   now >  endDate              → completed (isActive=false)
+// Lifecycle status, DERIVED from the shift's `date` + start/end times vs now:
+//   now <  start          → upcoming  (isActive=false)
+//   start <= now <= end   → isActive  (isActive=true)
+//   now >  end            → completed (isActive=false)
 // (Note: `isActive` is both the boolean field below and the middle status.)
 enum ShiftStatus {
   upcoming
@@ -117,29 +167,29 @@ model Shift {
   id            String       @id @default(auto()) @map("_id") @db.ObjectId
   userId        String       @db.ObjectId
   shiftName     String?
-  startDate     DateTime?
-  endDate       DateTime?
+  // A shift is a single calendar day. Times below are combined with this date
+  // (end-time <= start-time means the shift runs past midnight).
+  date          DateTime
   startTime     DateTime
   endTime       DateTime
   totalHours    Float
-  breakDuration Float        @default(0)
-  shiftType     ShiftType?
+  // Free-form type: day | night | rotational, OR a user-supplied custom label.
+  shiftType     String?
   status        ShiftStatus?
   isActive      Boolean?
   isManualEntry Boolean      @default(false)
-  confirmed     Boolean      @default(false)
   notes         String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  // A shift can have MANY salary rows — one per assigned employer/value.
+  // A shift can have MANY salary (wage) rows — one per assigned employer/value.
   // Deleting a shift sets salary.shiftId to null (salary rows are kept).
   salaries        Salary[]
   calendarEntries CalendarEntry[]
 
   @@index([userId])
-  @@index([userId, startDate])
+  @@index([userId, date])
   @@map("shifts")
 }
 
@@ -151,17 +201,25 @@ model CalendarEntry {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   userId    String   @db.ObjectId
   date      DateTime
+  // What this entry represents on the calendar: event | memo | shift (a label
+  // that surfaces an existing shift on the calendar with a chosen colour).
+  type      String   @default("memo")
   title     String
   shiftId   String?  @db.ObjectId
+  // Optional employee scope — entries created while viewing one employee's
+  // calendar. Null = the user's own (default) calendar.
+  employerId String? @db.ObjectId
   color     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  shift Shift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shift    Shift?    @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  employer Employer? @relation(fields: [employerId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([userId, date])
+  @@index([employerId])
   @@map("calendar_entries")
 }
 
@@ -178,6 +236,11 @@ model Salary {
   shiftId       String?  @db.ObjectId
   employerId    String?  @db.ObjectId
   salary        Float?
+  // Wage rate basis: hourly | weekly | monthly.
+  rateType      String   @default("hourly")
+  // Display currency (3-letter ISO). Totals still assume the global Settings
+  // currency; this is recorded per-wage for display.
+  currency      String?
   // Auto-derived = salary / shift.totalHours (computed server-side).
   hourlyPayRate Float?
   createdAt     DateTime @default(now())

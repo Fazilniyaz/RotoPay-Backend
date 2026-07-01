@@ -2,17 +2,19 @@
 // ─────────────────────────────────────────────
 // Shift Controller — CRUD + analytics
 //
-// POST   /api/shifts            create (+ optional salary assignments)
+// POST   /api/shifts            create
 // GET    /api/shifts            list (filter + search + paginate + summary)
 // GET    /api/shifts/analytics  dashboard totals
 // GET    /api/shifts/:id        read one
 // PATCH  /api/shifts/:id        update
-// DELETE /api/shifts/:id        delete (salary rows kept, shiftId set to null)
+// DELETE /api/shifts/:id        delete (wage rows kept, shiftId set to null)
 //
-// STATUS / isActive are DERIVED from startDate/endDate vs the current date.
-// They are stored on write AND re-derived on every read, so the value is always
-// current the moment the app loads — no cron needed. Status filters are
-// translated into date conditions for the same reason (always correct).
+// A shift is a SINGLE day (`date`) + start/end times. STATUS / isActive are
+// DERIVED from those vs the current moment (overnight-aware), stored on write
+// and re-derived on every read — always current, no cron needed.
+//
+// Creating a shift only affects TOTAL HOURS. Pay ("This Month Pay" / "Total
+// Pay") is realised separately via /api/payments (marking a month as paid).
 // ─────────────────────────────────────────────
 
 import { Request, Response } from "express";
@@ -21,33 +23,49 @@ import { Prisma, ShiftStatus } from "@prisma/client";
 import { prisma } from "../utilities/prisma.client";
 import { asyncHandler } from "../helpers/async.handler";
 import { parsePagination } from "../helpers/validators";
-import { sendSuccess, sendCreated, sendNotFound, sendError } from "../helpers/api.response";
+import { sendSuccess, sendCreated, sendNotFound } from "../helpers/api.response";
 import { CreateShiftInput, UpdateShiftInput } from "../helpers/shift.validation";
+import {
+  emitNotification,
+  scheduleShiftReminder,
+  cancelShiftReminders,
+  NotificationType,
+} from "../helpers/notification.service";
 
-// Each salary row brings along its employer's basic info.
+// Short, friendly date label for activity messages.
+const dateLabel = (d: Date) =>
+  new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+const shiftLabel = (s: { shiftName: string | null; shiftType: string | null }) =>
+  s.shiftName || s.shiftType || "Shift";
+
+// Each wage row brings along its employer's basic info.
 const shiftInclude = {
   salaries: {
     include: { employer: { select: { id: true, store: true, employerName: true } } },
   },
 };
 
-// ── Derive status + isActive from the active date range ──
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// ── Derive status + isActive from the shift's real start/end moments ──
+// startTime/endTime already carry the full datetime; if end <= start the shift
+// runs past midnight, so the end is on the following day.
 function deriveStatus(
-  startDate: Date | null,
-  endDate: Date | null,
+  startTime: Date,
+  endTime: Date,
   now: Date = new Date()
-): { status: ShiftStatus | null; isActive: boolean } {
-  if (!startDate || !endDate) return { status: null, isActive: false };
-  if (now < startDate) return { status: ShiftStatus.upcoming, isActive: false };
-  if (now > endDate) return { status: ShiftStatus.completed, isActive: false };
+): { status: ShiftStatus; isActive: boolean } {
+  const start = new Date(startTime);
+  let end = new Date(endTime);
+  if (end <= start) end = new Date(end.getTime() + DAY_MS);
+  if (now < start) return { status: ShiftStatus.upcoming, isActive: false };
+  if (now > end) return { status: ShiftStatus.completed, isActive: false };
   return { status: ShiftStatus.isActive, isActive: true };
 }
 
 // Re-derive status/isActive on a fetched record so the response is always current.
-function withCurrentStatus<T extends { startDate: Date | null; endDate: Date | null }>(
-  shift: T
-): T {
-  return { ...shift, ...deriveStatus(shift.startDate, shift.endDate) };
+function withCurrentStatus<T extends { startTime: Date; endTime: Date }>(shift: T): T {
+  return { ...shift, ...deriveStatus(shift.startTime, shift.endTime) };
 }
 
 // ─────────────────────────────────────────────
@@ -57,69 +75,44 @@ function withCurrentStatus<T extends { startDate: Date | null; endDate: Date | n
 export const createShift = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const body = req.body as CreateShiftInput;
-  const assignments = body.salaries ?? [];
 
-  if (assignments.length > 0) {
-    const employerIds = [...new Set(assignments.map((a) => a.employerId))];
-    const owned = await prisma.employer.count({ where: { id: { in: employerIds }, userId } });
-    if (owned !== employerIds.length) {
-      sendError(res, "One or more employers were not found", 404);
-      return;
-    }
-  }
-
-  const { status, isActive } = deriveStatus(body.startDate, body.endDate);
+  const { status, isActive } = deriveStatus(body.startTime, body.endTime);
 
   const shift = await prisma.shift.create({
     data: {
       userId,
       shiftName: body.shiftName ?? null,
-      startDate: body.startDate,
-      endDate: body.endDate,
+      date: body.date,
       startTime: body.startTime,
       endTime: body.endTime,
       totalHours: body.totalHours,
-      breakDuration: body.breakDuration ?? 0,
       shiftType: body.shiftType,
       status,
       isActive,
-      confirmed: body.confirmed ?? false,
       isManualEntry: body.isManualEntry ?? false,
       notes: body.notes ?? null,
     },
-  });
-
-  if (assignments.length > 0) {
-    try {
-      const rateFor = (value: number) =>
-        body.totalHours > 0 ? Math.round((value / body.totalHours) * 100) / 100 : null;
-      await prisma.salary.createMany({
-        data: assignments.map((a) => ({
-          userId,
-          shiftId: shift.id,
-          employerId: a.employerId,
-          salary: a.salary,
-          hourlyPayRate: rateFor(a.salary),
-        })),
-      });
-    } catch (err) {
-      await prisma.shift.delete({ where: { id: shift.id } }).catch(() => undefined);
-      throw err;
-    }
-  }
-
-  const created = await prisma.shift.findUnique({
-    where: { id: shift.id },
     include: shiftInclude,
   });
 
-  sendCreated(res, "Shift created successfully", created && withCurrentStatus(created));
+  const label = shiftLabel(shift);
+  await emitNotification({
+    userId,
+    type: NotificationType.SHIFT_ADDED,
+    title: "New shift added",
+    message: `${label} on ${dateLabel(shift.date)}.`,
+    relatedId: shift.id,
+    relatedType: "shift",
+  });
+  await scheduleShiftReminder(userId, shift.id, shift.startTime, label);
+
+  sendCreated(res, "Shift created successfully", withCurrentStatus(shift));
 });
 
 // ─────────────────────────────────────────────
 // LIST — GET /api/shifts
-// Query: ?status=&search=&employerId=&shiftType=&from=&to=&confirmed=&page=&limit=
-//   status ∈ upcoming|isActive|completed (translated to date conditions)
+// Query: ?status=&search=&employerId=&shiftType=&from=&to=&page=&limit=
+//   status ∈ upcoming|isActive|completed (translated to day-bounded date filters)
 //   search matches notes (case-insensitive)
 // ─────────────────────────────────────────────
 
@@ -131,30 +124,29 @@ export const getShifts = asyncHandler(async (req: Request, res: Response) => {
   const where: Prisma.ShiftWhereInput = { userId };
   const and: Prisma.ShiftWhereInput[] = [];
 
-  if (req.query.confirmed === "true") where.confirmed = true;
-  if (req.query.confirmed === "false") where.confirmed = false;
-
-  const shiftType = req.query.shiftType;
-  if (shiftType === "night" || shiftType === "day" || shiftType === "rotational") {
-    where.shiftType = shiftType;
+  // Free-form shift type (presets or custom label), exact match.
+  if (typeof req.query.shiftType === "string" && req.query.shiftType.trim()) {
+    where.shiftType = req.query.shiftType.trim();
   }
 
   if (typeof req.query.employerId === "string") {
     where.salaries = { some: { employerId: req.query.employerId } };
   }
 
-  // status → date conditions
+  // status → day-bounded date conditions
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
   const status = req.query.status;
-  if (status === "upcoming") and.push({ startDate: { gt: now } });
-  else if (status === "completed") and.push({ endDate: { lt: now } });
-  else if (status === "isActive") and.push({ startDate: { lte: now }, endDate: { gte: now } });
+  if (status === "upcoming") and.push({ date: { gt: endOfToday } });
+  else if (status === "completed") and.push({ date: { lt: startOfToday } });
+  else if (status === "isActive") and.push({ date: { gte: startOfToday, lte: endOfToday } });
 
   // search (notes)
   if (typeof req.query.search === "string" && req.query.search.trim()) {
     where.notes = { contains: req.query.search.trim(), mode: "insensitive" };
   }
 
-  // date range on startDate
+  // date range on `date`
   const dateFilter: Prisma.DateTimeFilter = {};
   if (typeof req.query.from === "string") {
     const from = new Date(req.query.from);
@@ -164,14 +156,14 @@ export const getShifts = asyncHandler(async (req: Request, res: Response) => {
     const to = new Date(req.query.to);
     if (!isNaN(to.getTime())) dateFilter.lte = to;
   }
-  if (Object.keys(dateFilter).length > 0) and.push({ startDate: dateFilter });
+  if (Object.keys(dateFilter).length > 0) and.push({ date: dateFilter });
 
   if (and.length > 0) where.AND = and;
 
   const [shifts, total, summary] = await Promise.all([
     prisma.shift.findMany({
       where,
-      orderBy: { startDate: "desc" },
+      orderBy: { date: "desc" },
       skip,
       take: limit,
       include: shiftInclude,
@@ -191,8 +183,8 @@ export const getShifts = asyncHandler(async (req: Request, res: Response) => {
 
 // ─────────────────────────────────────────────
 // ANALYTICS — GET /api/shifts/analytics
-// Totals for the shift dashboard cards (pay = linked Salary values by shift's
-// startDate; week starts Monday; month = calendar month).
+// Total hours come from shifts; pay comes from PaidMonth snapshots (a month's
+// pay is only realised once the user marks it paid on the calendar).
 // ─────────────────────────────────────────────
 
 export const getShiftAnalytics = asyncHandler(async (req: Request, res: Response) => {
@@ -200,30 +192,24 @@ export const getShiftAnalytics = asyncHandler(async (req: Request, res: Response
 
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const diffToMonday = (now.getDay() + 6) % 7;
-  const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - diffToMonday);
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
 
   const sumHours = (where: Prisma.ShiftWhereInput) =>
     prisma.shift.aggregate({ where, _sum: { totalHours: true } });
-  const sumPay = (where: Prisma.SalaryWhereInput) =>
-    prisma.salary.aggregate({ where, _sum: { salary: true } });
 
-  const [hoursAll, hoursMonth, hoursWeek, payAll, payMonth, payWeek] = await Promise.all([
+  const [hoursAll, hoursMonth, payTotal, payThisMonth] = await Promise.all([
     sumHours({ userId }),
-    sumHours({ userId, startDate: { gte: startOfMonth } }),
-    sumHours({ userId, startDate: { gte: startOfWeek } }),
-    sumPay({ userId }),
-    sumPay({ userId, shift: { startDate: { gte: startOfMonth } } }),
-    sumPay({ userId, shift: { startDate: { gte: startOfWeek } } }),
+    sumHours({ userId, date: { gte: startOfMonth } }),
+    prisma.paidMonth.aggregate({ where: { userId }, _sum: { amount: true } }),
+    prisma.paidMonth.findUnique({ where: { userId_year_month: { userId, year, month } } }),
   ]);
 
   sendSuccess(res, "Shift analytics fetched successfully", {
     totalHours: hoursAll._sum.totalHours ?? 0,
     thisMonthHours: hoursMonth._sum.totalHours ?? 0,
-    thisWeekHours: hoursWeek._sum.totalHours ?? 0,
-    totalPay: payAll._sum.salary ?? 0,
-    thisMonthPay: payMonth._sum.salary ?? 0,
-    thisWeekPay: payWeek._sum.salary ?? 0,
+    totalPay: payTotal._sum.amount ?? 0,
+    thisMonthPay: payThisMonth?.amount ?? 0,
   });
 });
 
@@ -259,10 +245,10 @@ export const updateShift = asyncHandler(async (req: Request, res: Response) => {
     return;
   }
 
-  // Recompute status/isActive from the merged date range.
-  const startDate = body.startDate ?? existing.startDate;
-  const endDate = body.endDate ?? existing.endDate;
-  const { status, isActive } = deriveStatus(startDate, endDate);
+  // Recompute status/isActive from the merged times.
+  const startTime = body.startTime ?? existing.startTime;
+  const endTime = body.endTime ?? existing.endTime;
+  const { status, isActive } = deriveStatus(startTime, endTime);
 
   const shift = await prisma.shift.update({
     where: { id },
@@ -270,18 +256,28 @@ export const updateShift = asyncHandler(async (req: Request, res: Response) => {
       status,
       isActive,
       ...(body.shiftName !== undefined && { shiftName: body.shiftName }),
-      ...(body.startDate !== undefined && { startDate: body.startDate }),
-      ...(body.endDate !== undefined && { endDate: body.endDate }),
+      ...(body.date !== undefined && { date: body.date }),
       ...(body.startTime !== undefined && { startTime: body.startTime }),
       ...(body.endTime !== undefined && { endTime: body.endTime }),
       ...(body.totalHours !== undefined && { totalHours: body.totalHours }),
-      ...(body.breakDuration !== undefined && { breakDuration: body.breakDuration }),
       ...(body.shiftType !== undefined && { shiftType: body.shiftType }),
-      ...(body.confirmed !== undefined && { confirmed: body.confirmed }),
       ...(body.isManualEntry !== undefined && { isManualEntry: body.isManualEntry }),
       ...(body.notes !== undefined && { notes: body.notes }),
     },
     include: shiftInclude,
+  });
+
+  // Refresh the reminder for the (possibly new) start time.
+  await cancelShiftReminders(userId, shift.id);
+  const label = shiftLabel(shift);
+  await scheduleShiftReminder(userId, shift.id, shift.startTime, label);
+  await emitNotification({
+    userId,
+    type: NotificationType.SHIFT_UPDATED,
+    title: "Shift updated",
+    message: `${label} on ${dateLabel(shift.date)} was updated.`,
+    relatedId: shift.id,
+    relatedType: "shift",
   });
 
   sendSuccess(res, "Shift updated successfully", withCurrentStatus(shift));
@@ -289,7 +285,7 @@ export const updateShift = asyncHandler(async (req: Request, res: Response) => {
 
 // ─────────────────────────────────────────────
 // DELETE — DELETE /api/shifts/:id
-// Salary rows are KEPT — their shiftId is set to null (schema onDelete: SetNull).
+// Wage rows are KEPT — their shiftId is set to null (schema onDelete: SetNull).
 // ─────────────────────────────────────────────
 
 export const deleteShift = asyncHandler(async (req: Request, res: Response) => {
@@ -303,6 +299,15 @@ export const deleteShift = asyncHandler(async (req: Request, res: Response) => {
   }
 
   await prisma.shift.delete({ where: { id } });
+
+  await cancelShiftReminders(userId, id);
+  await emitNotification({
+    userId,
+    type: NotificationType.SHIFT_REMOVED,
+    title: "Shift removed",
+    message: `${shiftLabel(existing)} on ${dateLabel(existing.date)} was removed.`,
+    relatedType: "shift",
+  });
 
   sendSuccess(res, "Shift deleted successfully");
 });

@@ -16,12 +16,25 @@ const salaryValue = z
   .nonnegative("Salary cannot be negative")
   .max(10_000_000, "Salary value is unrealistically high");
 
+// Wage rate basis.
+const rateType = z.enum(["hourly", "weekly", "monthly"], {
+  invalid_type_error: "Rate type must be hourly, weekly or monthly",
+});
+
+// 3-letter ISO currency code (e.g. GBP), uppercased.
+const currency = z
+  .string()
+  .length(3, "Currency must be a 3-letter ISO code (e.g. GBP)")
+  .toUpperCase();
+
 // ── Create ─────────────────────────────────────
 
 export const createSalarySchema = z.object({
   shiftId: objectId.optional(),
   employerId: objectId.optional(),
   salary: salaryValue,
+  rateType: rateType.optional(),
+  currency: currency.optional(),
 });
 
 // ── Update ─────────────────────────────────────
@@ -32,6 +45,8 @@ export const updateSalarySchema = z
     shiftId: objectId.nullable().optional(),
     employerId: objectId.nullable().optional(),
     salary: salaryValue.optional(),
+    rateType: rateType.optional(),
+    currency: currency.nullable().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: "Provide at least one field to update",

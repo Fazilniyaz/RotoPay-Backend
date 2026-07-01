@@ -21,6 +21,7 @@ import { asyncHandler } from "../helpers/async.handler";
 import { parsePagination } from "../helpers/validators";
 import { sendSuccess, sendCreated, sendError, sendNotFound } from "../helpers/api.response";
 import { ClockInInput } from "../helpers/clock.validation";
+import { emitNotification, NotificationType } from "../helpers/notification.service";
 
 // salary → employer details + shift details (the "fetch details" the model needs).
 const clockInclude = {
@@ -31,8 +32,7 @@ const clockInclude = {
         select: {
           id: true,
           shiftName: true,
-          startDate: true,
-          endDate: true,
+          date: true,
           startTime: true,
           endTime: true,
           totalHours: true,
@@ -81,6 +81,15 @@ export const clockIn = asyncHandler(async (req: Request, res: Response) => {
     include: clockInclude,
   });
 
+  await emitNotification({
+    userId,
+    type: NotificationType.CLOCK_IN,
+    title: "Clocked in",
+    message: `Clocked in${session.salary?.employer?.employerName ? ` at ${session.salary.employer.employerName}` : ""}.`,
+    relatedId: session.id,
+    relatedType: "clock",
+  });
+
   sendCreated(res, "Clocked in successfully", session);
 });
 
@@ -127,6 +136,15 @@ export const clockOut = asyncHandler(async (req: Request, res: Response) => {
       ...(notes !== undefined && { notes }),
     },
     include: clockInclude,
+  });
+
+  await emitNotification({
+    userId,
+    type: NotificationType.CLOCK_OUT,
+    title: "Clocked out",
+    message: `Clocked out${session.salary?.employer?.employerName ? ` from ${session.salary.employer.employerName}` : ""} — ${totalHours}h worked.`,
+    relatedId: session.id,
+    relatedType: "clock",
   });
 
   sendSuccess(res, "Clocked out successfully", session);

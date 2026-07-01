@@ -22,9 +22,23 @@ import { CreateCalendarInput, UpdateCalendarInput } from "../helpers/calendar.va
 
 const entryInclude = {
   shift: {
-    select: { id: true, shiftName: true, startDate: true, endDate: true, shiftType: true, status: true },
+    select: {
+      id: true,
+      shiftName: true,
+      date: true,
+      startTime: true,
+      endTime: true,
+      totalHours: true,
+      shiftType: true,
+      status: true,
+    },
   },
 };
+
+// Confirm an employer belongs to the user (for employee-scoped entries).
+async function ownsEmployer(userId: string, employerId: string): Promise<boolean> {
+  return (await prisma.employer.count({ where: { id: employerId, userId } })) > 0;
+}
 
 // ─────────────────────────────────────────────
 // CREATE — POST /api/calendar
@@ -41,13 +55,19 @@ export const createCalendarEntry = asyncHandler(async (req: Request, res: Respon
       return;
     }
   }
+  if (body.employerId && !(await ownsEmployer(userId, body.employerId))) {
+    sendError(res, "Employee not found", 404);
+    return;
+  }
 
   const entry = await prisma.calendarEntry.create({
     data: {
       userId,
       date: body.date,
+      type: body.type,
       title: body.title,
       shiftId: body.shiftId ?? null,
+      employerId: body.employerId ?? null,
       color: body.color ?? null,
     },
     include: entryInclude,
@@ -57,13 +77,22 @@ export const createCalendarEntry = asyncHandler(async (req: Request, res: Respon
 });
 
 // ─────────────────────────────────────────────
-// LIST — GET /api/calendar?from=&to=
+// LIST — GET /api/calendar?from=&to=&employerId=
+// employerId present → that employee's entries; absent → the user's own
+// (employerId null) calendar.
 // ─────────────────────────────────────────────
 
 export const getCalendarEntries = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.userId;
 
   const where: Prisma.CalendarEntryWhereInput = { userId };
+
+  if (typeof req.query.employerId === "string" && req.query.employerId.trim()) {
+    where.employerId = req.query.employerId.trim();
+  } else {
+    where.employerId = null;
+  }
+
   const dateFilter: Prisma.DateTimeFilter = {};
   if (typeof req.query.from === "string") {
     const from = new Date(req.query.from);
@@ -122,13 +151,19 @@ export const updateCalendarEntry = asyncHandler(async (req: Request, res: Respon
       return;
     }
   }
+  if (body.employerId && !(await ownsEmployer(userId, body.employerId))) {
+    sendError(res, "Employee not found", 404);
+    return;
+  }
 
   const entry = await prisma.calendarEntry.update({
     where: { id },
     data: {
       ...(body.date !== undefined && { date: body.date }),
+      ...(body.type !== undefined && { type: body.type }),
       ...(body.title !== undefined && { title: body.title }),
       ...(body.shiftId !== undefined && { shiftId: body.shiftId }),
+      ...(body.employerId !== undefined && { employerId: body.employerId }),
       ...(body.color !== undefined && { color: body.color }),
     },
     include: entryInclude,

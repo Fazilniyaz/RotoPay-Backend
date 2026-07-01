@@ -43,6 +43,11 @@ export const env = {
   GOOGLE_CLIENT_ID: requireEnv("GOOGLE_CLIENT_ID"),
   GOOGLE_CLIENT_SECRET: requireEnv("GOOGLE_CLIENT_SECRET"),
 
+  // ImageKit (profile picture storage)
+  IMAGEKIT_URL_ENDPOINT: requireEnv("IMAGEKIT_URL_ENDPOINT"),
+  IMAGEKIT_PUBLIC_KEY: requireEnv("IMAGEKIT_PUBLIC_KEY"),
+  IMAGEKIT_PRIVATE_KEY: requireEnv("IMAGEKIT_PRIVATE_KEY"),
+
   // Tokens
   EMAIL_VERIFY_TOKEN_EXPIRES_HOURS: parseInt(
     optionalEnv("EMAIL_VERIFY_TOKEN_EXPIRES_HOURS", "24"),

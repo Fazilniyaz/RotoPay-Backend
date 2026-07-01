@@ -20,20 +20,19 @@ import { asyncHandler } from "../helpers/async.handler";
 import { parsePagination } from "../helpers/validators";
 import { sendSuccess, sendCreated, sendNotFound, sendError } from "../helpers/api.response";
 import { CreateSalaryInput, UpdateSalaryInput } from "../helpers/salary.validation";
+import { emitNotification, NotificationType } from "../helpers/notification.service";
 
 const salaryInclude = {
   shift: {
     select: {
       id: true,
       shiftName: true,
-      startDate: true,
-      endDate: true,
+      date: true,
       startTime: true,
       endTime: true,
       totalHours: true,
       shiftType: true,
       status: true,
-      confirmed: true,
     },
   },
   employer: { select: { id: true, store: true, employerName: true } },
@@ -89,9 +88,21 @@ export const createSalary = asyncHandler(async (req: Request, res: Response) => 
       salary: body.salary,
       shiftId: body.shiftId ?? null,
       employerId: body.employerId ?? null,
+      rateType: body.rateType ?? "hourly",
+      currency: body.currency ?? null,
       hourlyPayRate,
     },
     include: salaryInclude,
+  });
+
+  const who = salary.employer?.employerName ?? "an employee";
+  await emitNotification({
+    userId,
+    type: NotificationType.WAGE_ADDED,
+    title: "Wage added",
+    message: `${salary.rateType} wage of ${salary.currency ?? ""} ${(salary.salary ?? 0).toLocaleString()} set for ${who}.`,
+    relatedId: salary.id,
+    relatedType: "wage",
   });
 
   sendCreated(res, "Salary created successfully", salary);
@@ -188,6 +199,8 @@ export const updateSalary = asyncHandler(async (req: Request, res: Response) => 
     data: {
       hourlyPayRate,
       ...(body.salary !== undefined && { salary: body.salary }),
+      ...(body.rateType !== undefined && { rateType: body.rateType }),
+      ...(body.currency !== undefined && { currency: body.currency }),
       // `shiftId`/`employerId` present in body (incl. null) → apply it.
       ...(body.shiftId !== undefined && { shiftId: body.shiftId }),
       ...(body.employerId !== undefined && { employerId: body.employerId }),

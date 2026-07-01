@@ -20,6 +20,10 @@ import salaryRouter from "./routes/salary.router";
 import clockRouter from "./routes/clock.router";
 import calendarRouter from "./routes/calendar.router";
 import settingsRouter from "./routes/settings.router";
+import paymentRouter from "./routes/payment.router";
+import currencyRouter from "./routes/currency.router";
+import notificationRouter from "./routes/notification.router";
+import reportRouter from "./routes/report.router";
 
 // ─────────────────────────────────────────────
 
@@ -40,7 +44,13 @@ app.use(
 );
 
 // ── Body Parser ────────────────────────────────
-app.use(express.json({ limit: "10kb" })); // Limit body size
+// Keep a tight 10kb cap globally, but skip the profile-picture route so its
+// own route-scoped parser can accept the larger base64 image payload.
+const jsonParser = express.json({ limit: "10kb" });
+app.use((req, res, next) => {
+  if (req.path === "/api/settings/profile-picture") return next();
+  return jsonParser(req, res, next);
+});
 app.use(express.urlencoded({ extended: true, limit: "10kb" }));
 
 // ── Request Logger ─────────────────────────────
@@ -69,6 +79,10 @@ app.use("/api/salaries", salaryRouter);
 app.use("/api/clock", clockRouter);
 app.use("/api/calendar", calendarRouter);
 app.use("/api/settings", settingsRouter);
+app.use("/api/payments", paymentRouter);
+app.use("/api/currency", currencyRouter);
+app.use("/api/notifications", notificationRouter);
+app.use("/api/reports", reportRouter);
 
 // Future routes will be added here:
 // app.use("/api/users", userRouter);
