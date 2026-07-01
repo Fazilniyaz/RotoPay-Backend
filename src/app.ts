@@ -36,7 +36,7 @@ app.use(helmet());
 app.use(
   cors({
     origin
-        : [env.CLIENT_URL, "http://localhost:8081", "http://192.168.0.102:8081", "http://localhost:3000"],
+        : [env.CLIENT_URL, "http://localhost:8081", "http://192.168.0.102:8081", "http://localhost:3000", "https://roto-pay-admin-web-app.vercel.app"],
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
