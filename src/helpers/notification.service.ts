@@ -73,6 +73,14 @@ export async function scheduleShiftReminder(
   const start = new Date(startTime).getTime();
   if (start <= Date.now()) return; // shift already started/past
 
+  // Respect the user's preference — skip if shift reminders are turned off.
+  // (No settings row yet ⇒ the schema default of `true` applies.)
+  const settings = await prisma.userSettings.findUnique({
+    where: { userId },
+    select: { notifyShiftReminder: true },
+  });
+  if (settings && !settings.notifyShiftReminder) return;
+
   const remindAt = new Date(start - HOUR_MS);
   await emitNotification({
     userId,

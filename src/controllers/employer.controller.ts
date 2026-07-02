@@ -22,12 +22,16 @@ import {
   sendSuccess,
   sendCreated,
   sendNotFound,
+  sendError,
 } from "../helpers/api.response";
 import {
   CreateEmployerInput,
   UpdateEmployerInput,
 } from "../helpers/employer.validation";
 import { emitNotification, NotificationType } from "../helpers/notification.service";
+
+// A user may register at most this many employers.
+export const MAX_EMPLOYERS = 3;
 
 // ─────────────────────────────────────────────
 // CREATE — POST /api/employers
@@ -36,6 +40,17 @@ import { emitNotification, NotificationType } from "../helpers/notification.serv
 export const createEmployer = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const body = req.body as CreateEmployerInput;
+
+  // Enforce the per-user employer cap.
+  const existingCount = await prisma.employer.count({ where: { userId } });
+  if (existingCount >= MAX_EMPLOYERS) {
+    sendError(
+      res,
+      `You can add a maximum of ${MAX_EMPLOYERS} employees.`,
+      409
+    );
+    return;
+  }
 
   const employer = await prisma.employer.create({
     data: {
