@@ -18,17 +18,21 @@
 import { prisma } from "../utilities/prisma.client";
 
 // Known activity types (kept in sync with the frontend's icon/colour map).
+// Only these types are surfaced to the user (see product spec). Legacy types are
+// kept in the map for backwards compatibility but are no longer emitted.
 export const NotificationType = {
+  SHIFT_REMINDER: "shift_reminder", // "starts in about an hour"
+  PAYMENT_CONFIRMED: "payment_confirmed", // "Payment updated"
+  CLOCK_IN: "clock_in", // "shift started, clocked in!"
+  CLOCK_OUT: "clock_out", // "shift ended, clocked out!"
+  SHIFT_WATER: "shift_water", // "take some water…" at the half-way point
+  // ── legacy (no longer emitted) ──
   SHIFT_ADDED: "shift_added",
   SHIFT_UPDATED: "shift_updated",
   SHIFT_REMOVED: "shift_removed",
-  SHIFT_REMINDER: "shift_reminder",
   PROFILE_UPDATED: "profile_updated",
-  PAYMENT_CONFIRMED: "payment_confirmed",
   EMPLOYEE_ADDED: "employee_added",
   WAGE_ADDED: "wage_added",
-  CLOCK_IN: "clock_in",
-  CLOCK_OUT: "clock_out",
 } as const;
 
 interface EmitInput {

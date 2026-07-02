@@ -7,6 +7,7 @@
 import { env } from "./utilities/env";
 import { prisma } from "./utilities/prisma.client";
 import { verifyMailerConnection } from "./utilities/mailer";
+import { startScheduler } from "./services/scheduler.service";
 import app from "./app";
 
 async function startServer(): Promise<void> {
@@ -19,7 +20,10 @@ async function startServer(): Promise<void> {
     // ── 2. Verify Mailer ──────────────────────────
     await verifyMailerConnection();
 
-    // ── 3. Start Express ──────────────────────────
+    // ── 3. Start background scheduler (auto clock-in/out, reminders) ──
+    startScheduler();
+
+    // ── 4. Start Express ──────────────────────────
     const server = app.listen(env.PORT, () => {
       console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
       console.log(`🚀 RotaPay API running in ${env.NODE_ENV} mode`);

@@ -20,7 +20,6 @@ import { asyncHandler } from "../helpers/async.handler";
 import { parsePagination } from "../helpers/validators";
 import { sendSuccess, sendCreated, sendNotFound, sendError } from "../helpers/api.response";
 import { CreateSalaryInput, UpdateSalaryInput } from "../helpers/salary.validation";
-import { emitNotification, NotificationType } from "../helpers/notification.service";
 
 const salaryInclude = {
   shift: {
@@ -47,20 +46,20 @@ async function ownsEmployer(userId: string, employerId: string): Promise<boolean
   return (await prisma.employer.count({ where: { id: employerId, userId } })) > 0;
 }
 
-// hourlyPayRate = salary ÷ the linked shift's totalHours (rounded to 2dp).
-// Null when there's no shift or no value to derive it from.
-async function computeHourlyRate(
+// Total pay = hourlyPayRate × the linked shift's totalHours (rounded to 2dp).
+// e.g. £4/h × 8h = £32. Null when there's no shift/rate to derive it from.
+async function computeTotalFromRate(
   userId: string,
   shiftId: string | null | undefined,
-  salaryValue: number | null | undefined
+  hourlyPayRate: number | null | undefined
 ): Promise<number | null> {
-  if (!shiftId || salaryValue == null) return null;
+  if (!shiftId || hourlyPayRate == null) return null;
   const shift = await prisma.shift.findFirst({
     where: { id: shiftId, userId },
     select: { totalHours: true },
   });
-  if (!shift || !shift.totalHours) return null;
-  return Math.round((salaryValue / shift.totalHours) * 100) / 100;
+  if (!shift || shift.totalHours == null) return null;
+  return Math.round(hourlyPayRate * shift.totalHours * 100) / 100;
 }
 
 // ─────────────────────────────────────────────
@@ -80,29 +79,20 @@ export const createSalary = asyncHandler(async (req: Request, res: Response) => 
     return;
   }
 
-  const hourlyPayRate = await computeHourlyRate(userId, body.shiftId, body.salary);
+  // The entered value is the hourly rate; the shift's hours derive the total pay.
+  const total = await computeTotalFromRate(userId, body.shiftId, body.hourlyPayRate);
 
   const salary = await prisma.salary.create({
     data: {
       userId,
-      salary: body.salary,
+      salary: total,
+      hourlyPayRate: body.hourlyPayRate,
       shiftId: body.shiftId ?? null,
       employerId: body.employerId ?? null,
-      rateType: body.rateType ?? "hourly",
+      rateType: "hourly",
       currency: body.currency ?? null,
-      hourlyPayRate,
     },
     include: salaryInclude,
-  });
-
-  const who = salary.employer?.employerName ?? "an employee";
-  await emitNotification({
-    userId,
-    type: NotificationType.WAGE_ADDED,
-    title: "Wage added",
-    message: `${salary.rateType} wage of ${salary.currency ?? ""} ${(salary.salary ?? 0).toLocaleString()} set for ${who}.`,
-    relatedId: salary.id,
-    relatedType: "wage",
   });
 
   sendCreated(res, "Salary created successfully", salary);
@@ -189,17 +179,17 @@ export const updateSalary = asyncHandler(async (req: Request, res: Response) => 
     return;
   }
 
-  // Recompute the hourly rate from the merged shift + value.
+  // Recompute the derived total from the merged shift + hourly rate.
   const effShiftId = body.shiftId !== undefined ? body.shiftId : existing.shiftId;
-  const effValue = body.salary !== undefined ? body.salary : existing.salary;
-  const hourlyPayRate = await computeHourlyRate(userId, effShiftId, effValue);
+  const effRate = body.hourlyPayRate !== undefined ? body.hourlyPayRate : existing.hourlyPayRate;
+  const total = await computeTotalFromRate(userId, effShiftId, effRate);
 
   const salary = await prisma.salary.update({
     where: { id },
     data: {
-      hourlyPayRate,
-      ...(body.salary !== undefined && { salary: body.salary }),
-      ...(body.rateType !== undefined && { rateType: body.rateType }),
+      salary: total,
+      ...(body.hourlyPayRate !== undefined && { hourlyPayRate: body.hourlyPayRate }),
+      rateType: "hourly",
       ...(body.currency !== undefined && { currency: body.currency }),
       // `shiftId`/`employerId` present in body (incl. null) → apply it.
       ...(body.shiftId !== undefined && { shiftId: body.shiftId }),

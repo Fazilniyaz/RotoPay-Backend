@@ -110,9 +110,13 @@ model UserSettings {
   nativeCurrency         String?
   salaryCalcMode         String   @default("automatic")
   clockInOutEnabled      Boolean  @default(true)
+  // How clock-in happens for the current shift: "automatic" (default) fires via
+  // the scheduler when a shift starts/ends; "manual" leaves it to the user.
+  clockInType            String   @default("automatic")
   language               String   @default("en")
   dateFormat             String   @default("DD/MM/YYYY")
-  timeFormat             String   @default("24h")
+  // 12-hour AM/PM by default; the user can switch to 24h in Settings.
+  timeFormat             String   @default("12h")
   notifyShiftReminder    Boolean  @default(true)
   notifyEventReminder    Boolean  @default(true)
   notifyBirthdayReminder Boolean  @default(true)
@@ -175,6 +179,9 @@ model Shift {
   totalHours    Float
   // Free-form type: day | night | rotational, OR a user-supplied custom label.
   shiftType     String?
+  // Label colour chosen when the shift is created; the calendar renders shift
+  // entries in this colour (events/memos keep their own calendar colour).
+  color         String?
   status        ShiftStatus?
   isActive      Boolean?
   isManualEntry Boolean      @default(false)
@@ -187,6 +194,7 @@ model Shift {
   // Deleting a shift sets salary.shiftId to null (salary rows are kept).
   salaries        Salary[]
   calendarEntries CalendarEntry[]
+  clockSessions   ClockSession[]
 
   @@index([userId])
   @@index([userId, date])
@@ -265,6 +273,9 @@ model ClockSession {
   employerId       String?   @db.ObjectId
   // Links to the Salary row → carries employer + shift details + hourly rate.
   salaryId         String?   @db.ObjectId
+  // Direct link to the shift being clocked — set for auto (scheduler) sessions
+  // so we can dedupe/auto-clock-out per shift even when no salary is attached.
+  shiftId          String?   @db.ObjectId
   clockInTime      DateTime
   clockOutTime     DateTime?
   totalHours       Float?
@@ -278,11 +289,13 @@ model ClockSession {
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   employer Employer? @relation(fields: [employerId], references: [id], onDelete: SetNull)
   salary   Salary?   @relation(fields: [salaryId], references: [id], onDelete: SetNull)
+  shift    Shift?    @relation(fields: [shiftId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([employerId])
   @@index([salaryId])
   @@index([userId, status])
+  @@index([shiftId])
   @@map("clock_sessions")
 }
 

@@ -25,6 +25,7 @@ export const updateSettingsSchema = z
       .optional(),
     dateFormat: z.enum(["DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"]).optional(),
     timeFormat: z.enum(["12h", "24h"]).optional(),
+    clockInType: z.enum(["automatic", "manual"]).optional(),
     reportMonths: z
       .number()
       .int("Report range must be a whole number of months")

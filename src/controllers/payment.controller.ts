@@ -72,7 +72,7 @@ export const markMonthPaid = asyncHandler(async (req: Request, res: Response) =>
   await emitNotification({
     userId,
     type: NotificationType.PAYMENT_CONFIRMED,
-    title: "Payment confirmed",
+    title: "Payment updated",
     message: `${MONTHS[month - 1]} ${year} marked as paid — ${cur} ${amount.toLocaleString()}.`,
     relatedType: "payment",
   });

@@ -28,7 +28,6 @@ import {
   CreateEmployerInput,
   UpdateEmployerInput,
 } from "../helpers/employer.validation";
-import { emitNotification, NotificationType } from "../helpers/notification.service";
 
 // A user may register at most this many employers.
 export const MAX_EMPLOYERS = 3;
@@ -60,15 +59,6 @@ export const createEmployer = asyncHandler(async (req: Request, res: Response) =
       notes: body.notes ?? null,
       isActive: body.isActive ?? true,
     },
-  });
-
-  await emitNotification({
-    userId,
-    type: NotificationType.EMPLOYEE_ADDED,
-    title: "New employee added",
-    message: `${employer.employerName} at ${employer.store} was added.`,
-    relatedId: employer.id,
-    relatedType: "employer",
   });
 
   sendCreated(res, "Employer created successfully", employer);

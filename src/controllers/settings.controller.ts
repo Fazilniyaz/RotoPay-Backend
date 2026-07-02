@@ -13,7 +13,6 @@ import { asyncHandler } from "../helpers/async.handler";
 import { sendSuccess, sendError } from "../helpers/api.response";
 import { UpdateSettingsInput } from "../helpers/settings.validation";
 import { uploadProfileImage, deleteImage } from "../utilities/imagekit";
-import { emitNotification, NotificationType } from "../helpers/notification.service";
 
 async function buildPayload(userId: string) {
   const [user, settings] = await Promise.all([
@@ -36,6 +35,8 @@ async function buildPayload(userId: string) {
       dateFormat: settings.dateFormat,
       timeFormat: settings.timeFormat,
       reportMonths: settings.reportMonths ?? 1,
+      // "automatic" (default) → the scheduler clocks the user in/out; "manual".
+      clockInType: settings.clockInType,
       theme: settings.theme,
       language: settings.language,
     },
@@ -71,28 +72,20 @@ export const updateSettings = asyncHandler(async (req: Request, res: Response) =
     dateFormat?: string;
     timeFormat?: string;
     reportMonths?: number;
+    clockInType?: string;
   } = {};
   if (body.currency !== undefined) prefs.currency = body.currency;
   if (body.nativeCurrency !== undefined) prefs.nativeCurrency = body.nativeCurrency;
   if (body.dateFormat !== undefined) prefs.dateFormat = body.dateFormat;
   if (body.timeFormat !== undefined) prefs.timeFormat = body.timeFormat;
   if (body.reportMonths !== undefined) prefs.reportMonths = body.reportMonths;
+  if (body.clockInType !== undefined) prefs.clockInType = body.clockInType;
 
   if (Object.keys(prefs).length > 0) {
     await prisma.userSettings.upsert({
       where: { userId },
       create: { userId, ...prefs },
       update: prefs,
-    });
-  }
-
-  if (body.displayName !== undefined) {
-    await emitNotification({
-      userId,
-      type: NotificationType.PROFILE_UPDATED,
-      title: "Profile updated",
-      message: "Your profile details were updated.",
-      relatedType: "profile",
     });
   }
 
@@ -150,14 +143,6 @@ export const updateProfilePicture = asyncHandler(async (req: Request, res: Respo
       console.error("[Settings] Failed to delete old profile picture:", err);
     }
   }
-
-  await emitNotification({
-    userId,
-    type: NotificationType.PROFILE_UPDATED,
-    title: "Profile updated",
-    message: "Your profile photo was updated.",
-    relatedType: "profile",
-  });
 
   const payload = await buildPayload(userId);
   sendSuccess(res, "Profile picture updated successfully", payload);

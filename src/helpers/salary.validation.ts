@@ -11,15 +11,15 @@
 import { z } from "zod";
 import { objectId } from "./validators";
 
-const salaryValue = z
-  .number({ required_error: "Salary value is required" })
-  .nonnegative("Salary cannot be negative")
-  .max(10_000_000, "Salary value is unrealistically high");
+// The hourly pay rate the user enters. Per-day/total pay is derived server-side
+// as hourlyPayRate × the linked shift's totalHours.
+const hourlyRate = z
+  .number({ required_error: "Hourly rate is required" })
+  .nonnegative("Hourly rate cannot be negative")
+  .max(1_000_000, "Hourly rate is unrealistically high");
 
-// Wage rate basis.
-const rateType = z.enum(["hourly", "weekly", "monthly"], {
-  invalid_type_error: "Rate type must be hourly, weekly or monthly",
-});
+// Wages are hourly-only now (weekly/monthly removed).
+const rateType = z.literal("hourly");
 
 // 3-letter ISO currency code (e.g. GBP), uppercased.
 const currency = z
@@ -32,7 +32,7 @@ const currency = z
 export const createSalarySchema = z.object({
   shiftId: objectId.optional(),
   employerId: objectId.optional(),
-  salary: salaryValue,
+  hourlyPayRate: hourlyRate,
   rateType: rateType.optional(),
   currency: currency.optional(),
 });
@@ -44,7 +44,7 @@ export const updateSalarySchema = z
   .object({
     shiftId: objectId.nullable().optional(),
     employerId: objectId.nullable().optional(),
-    salary: salaryValue.optional(),
+    hourlyPayRate: hourlyRate.optional(),
     rateType: rateType.optional(),
     currency: currency.nullable().optional(),
   })

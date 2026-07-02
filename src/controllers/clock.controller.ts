@@ -84,8 +84,8 @@ export const clockIn = asyncHandler(async (req: Request, res: Response) => {
   await emitNotification({
     userId,
     type: NotificationType.CLOCK_IN,
-    title: "Clocked in",
-    message: `Clocked in${session.salary?.employer?.employerName ? ` at ${session.salary.employer.employerName}` : ""}.`,
+    title: "Shift started",
+    message: "Shift started, clocked in!",
     relatedId: session.id,
     relatedType: "clock",
   });
@@ -141,8 +141,8 @@ export const clockOut = asyncHandler(async (req: Request, res: Response) => {
   await emitNotification({
     userId,
     type: NotificationType.CLOCK_OUT,
-    title: "Clocked out",
-    message: `Clocked out${session.salary?.employer?.employerName ? ` from ${session.salary.employer.employerName}` : ""} — ${totalHours}h worked.`,
+    title: "Shift ended",
+    message: "Shift ended, clocked out!",
     relatedId: session.id,
     relatedType: "clock",
   });

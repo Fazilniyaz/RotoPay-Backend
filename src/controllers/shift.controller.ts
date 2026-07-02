@@ -23,18 +23,13 @@ import { Prisma, ShiftStatus } from "@prisma/client";
 import { prisma } from "../utilities/prisma.client";
 import { asyncHandler } from "../helpers/async.handler";
 import { parsePagination } from "../helpers/validators";
-import { sendSuccess, sendCreated, sendNotFound } from "../helpers/api.response";
+import { sendSuccess, sendCreated, sendNotFound, sendError } from "../helpers/api.response";
 import { CreateShiftInput, UpdateShiftInput } from "../helpers/shift.validation";
 import {
-  emitNotification,
   scheduleShiftReminder,
   cancelShiftReminders,
-  NotificationType,
 } from "../helpers/notification.service";
 
-// Short, friendly date label for activity messages.
-const dateLabel = (d: Date) =>
-  new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 const shiftLabel = (s: { shiftName: string | null; shiftType: string | null }) =>
   s.shiftName || s.shiftType || "Shift";
 
@@ -68,6 +63,66 @@ function withCurrentStatus<T extends { startTime: Date; endTime: Date }>(shift: 
   return { ...shift, ...deriveStatus(shift.startTime, shift.endTime) };
 }
 
+// Absolute [startMs, endMs] for a shift's times (overnight-aware: end<=start ⇒ +1 day).
+function intervalMs(startTime: Date, endTime: Date): [number, number] {
+  const start = new Date(startTime).getTime();
+  let end = new Date(endTime).getTime();
+  if (end <= start) end += DAY_MS;
+  return [start, end];
+}
+
+// Total hours worked, overnight-aware, rounded to 2dp — the single source of truth
+// for a shift's duration (client-sent totalHours is ignored).
+function hoursBetween(startTime: Date, endTime: Date): number {
+  const [start, end] = intervalMs(startTime, endTime);
+  return Math.round(((end - start) / 3_600_000) * 100) / 100;
+}
+
+// Re-derive each linked wage's total (= hourlyPayRate × totalHours) after a
+// shift's hours change, so "This Month Pay"/"Total Pay" stay accurate.
+async function syncSalariesForShift(userId: string, shiftId: string, totalHours: number): Promise<void> {
+  const wages = await prisma.salary.findMany({
+    where: { userId, shiftId },
+    select: { id: true, hourlyPayRate: true },
+  });
+  await Promise.all(
+    wages
+      .filter((w) => w.hourlyPayRate != null)
+      .map((w) =>
+        prisma.salary.update({
+          where: { id: w.id },
+          data: { salary: Math.round((w.hourlyPayRate as number) * totalHours * 100) / 100 },
+        })
+      )
+  );
+}
+
+// True if the given time range overlaps any existing shift on the same day.
+async function hasTimeConflict(
+  userId: string,
+  date: Date,
+  startTime: Date,
+  endTime: Date,
+  excludeId?: string
+): Promise<boolean> {
+  const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const dayEnd = new Date(dayStart.getTime() + DAY_MS);
+  const sameDay = await prisma.shift.findMany({
+    where: {
+      userId,
+      date: { gte: dayStart, lt: dayEnd },
+      ...(excludeId && { id: { not: excludeId } }),
+    },
+    select: { startTime: true, endTime: true },
+  });
+  const [ns, ne] = intervalMs(startTime, endTime);
+  // Half-open overlap: two intervals clash when each starts before the other ends.
+  return sameDay.some((s) => {
+    const [es, ee] = intervalMs(s.startTime, s.endTime);
+    return ns < ee && es < ne;
+  });
+}
+
 // ─────────────────────────────────────────────
 // CREATE — POST /api/shifts
 // ─────────────────────────────────────────────
@@ -76,17 +131,30 @@ export const createShift = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const body = req.body as CreateShiftInput;
 
+  // A shift is always "today" — the UI omits the date; validation already rejects
+  // any non-today date if one is sent.
+  const shiftDate = body.date ?? new Date();
+  // Hours are the single source of truth for pay — always derived from the times.
+  const totalHours = hoursBetween(body.startTime, body.endTime);
+
+  // Reject overlapping shifts on the same day.
+  if (await hasTimeConflict(userId, shiftDate, body.startTime, body.endTime)) {
+    sendError(res, "This time overlaps a shift you already have today", 409);
+    return;
+  }
+
   const { status, isActive } = deriveStatus(body.startTime, body.endTime);
 
   const shift = await prisma.shift.create({
     data: {
       userId,
       shiftName: body.shiftName ?? null,
-      date: body.date,
+      date: shiftDate,
       startTime: body.startTime,
       endTime: body.endTime,
-      totalHours: body.totalHours,
+      totalHours,
       shiftType: body.shiftType,
+      color: body.color ?? null,
       status,
       isActive,
       isManualEntry: body.isManualEntry ?? false,
@@ -95,16 +163,8 @@ export const createShift = asyncHandler(async (req: Request, res: Response) => {
     include: shiftInclude,
   });
 
-  const label = shiftLabel(shift);
-  await emitNotification({
-    userId,
-    type: NotificationType.SHIFT_ADDED,
-    title: "New shift added",
-    message: `${label} on ${dateLabel(shift.date)}.`,
-    relatedId: shift.id,
-    relatedType: "shift",
-  });
-  await scheduleShiftReminder(userId, shift.id, shift.startTime, label);
+  // Only the 1-hour reminder is surfaced for shifts (see notification spec).
+  await scheduleShiftReminder(userId, shift.id, shift.startTime, shiftLabel(shift));
 
   sendCreated(res, "Shift created successfully", withCurrentStatus(shift));
 });
@@ -245,9 +305,21 @@ export const updateShift = asyncHandler(async (req: Request, res: Response) => {
     return;
   }
 
-  // Recompute status/isActive from the merged times.
+  // Recompute status/isActive + hours from the merged times.
   const startTime = body.startTime ?? existing.startTime;
   const endTime = body.endTime ?? existing.endTime;
+  const shiftDate = body.date ?? existing.date;
+
+  // Re-check conflicts only when the timing/day actually changed.
+  if (
+    (body.startTime !== undefined || body.endTime !== undefined || body.date !== undefined) &&
+    (await hasTimeConflict(userId, shiftDate, startTime, endTime, id))
+  ) {
+    sendError(res, "This time overlaps another shift on that day", 409);
+    return;
+  }
+
+  const totalHours = hoursBetween(startTime, endTime);
   const { status, isActive } = deriveStatus(startTime, endTime);
 
   const shift = await prisma.shift.update({
@@ -255,30 +327,26 @@ export const updateShift = asyncHandler(async (req: Request, res: Response) => {
     data: {
       status,
       isActive,
+      totalHours,
       ...(body.shiftName !== undefined && { shiftName: body.shiftName }),
       ...(body.date !== undefined && { date: body.date }),
       ...(body.startTime !== undefined && { startTime: body.startTime }),
       ...(body.endTime !== undefined && { endTime: body.endTime }),
-      ...(body.totalHours !== undefined && { totalHours: body.totalHours }),
       ...(body.shiftType !== undefined && { shiftType: body.shiftType }),
+      ...(body.color !== undefined && { color: body.color }),
       ...(body.isManualEntry !== undefined && { isManualEntry: body.isManualEntry }),
       ...(body.notes !== undefined && { notes: body.notes }),
     },
     include: shiftInclude,
   });
 
+  // A shift's total hours changed ⇒ its derived wage totals change too. Keep the
+  // linked salary rows' derived `salary` (= hourlyPayRate × totalHours) in sync.
+  await syncSalariesForShift(userId, shift.id, totalHours);
+
   // Refresh the reminder for the (possibly new) start time.
   await cancelShiftReminders(userId, shift.id);
-  const label = shiftLabel(shift);
-  await scheduleShiftReminder(userId, shift.id, shift.startTime, label);
-  await emitNotification({
-    userId,
-    type: NotificationType.SHIFT_UPDATED,
-    title: "Shift updated",
-    message: `${label} on ${dateLabel(shift.date)} was updated.`,
-    relatedId: shift.id,
-    relatedType: "shift",
-  });
+  await scheduleShiftReminder(userId, shift.id, shift.startTime, shiftLabel(shift));
 
   sendSuccess(res, "Shift updated successfully", withCurrentStatus(shift));
 });
@@ -301,13 +369,6 @@ export const deleteShift = asyncHandler(async (req: Request, res: Response) => {
   await prisma.shift.delete({ where: { id } });
 
   await cancelShiftReminders(userId, id);
-  await emitNotification({
-    userId,
-    type: NotificationType.SHIFT_REMOVED,
-    title: "Shift removed",
-    message: `${shiftLabel(existing)} on ${dateLabel(existing.date)} was removed.`,
-    relatedType: "shift",
-  });
 
   sendSuccess(res, "Shift deleted successfully");
 });
