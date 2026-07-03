@@ -22,7 +22,19 @@ function optionalEnv(key: string, fallback: string): string {
 export const env = {
   NODE_ENV: optionalEnv("NODE_ENV", "development"),
   PORT: parseInt(optionalEnv("PORT", "5000"), 10),
+
+  // Default client URL — used as the fallback when the request carries no
+  // recognisable client signal (keeps legacy behaviour intact).
   CLIENT_URL: optionalEnv("CLIENT_URL", "http://localhost:3000"),
+
+  // Per-client base URLs. Email links (verify / reset / welcome) are built
+  // against whichever of these matches the originating client, so one deployed
+  // backend can serve the web app (local + Vercel) and the native app
+  // (local Expo + Play Store) simultaneously. See utilities/client-url.ts.
+  CLIENT_URL_WEB_LOCAL: optionalEnv("CLIENT_URL_WEB_LOCAL", "http://localhost:3000"),
+  CLIENT_URL_WEB_PROD: optionalEnv("CLIENT_URL_WEB_PROD", "https://roto-pay-admin-web-app.vercel.app"),
+  CLIENT_URL_MOBILE_LOCAL: optionalEnv("CLIENT_URL_MOBILE_LOCAL", "http://localhost:8081"),
+  CLIENT_URL_MOBILE: optionalEnv("CLIENT_URL_MOBILE", "rotopay://"),
 
   // JWT
   JWT_ACCESS_SECRET: requireEnv("JWT_ACCESS_SECRET"),

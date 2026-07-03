@@ -16,6 +16,7 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "../utilities/prisma.client";
 import { env } from "../utilities/env";
+import { resolveClientBaseUrl } from "../utilities/client-url";
 import { signAccessToken, signRefreshToken, getRefreshTokenExpiryDate, verifyRefreshToken } from "../utilities/jwt";
 import { verifyGoogleToken } from "../utilities/google.oauth";
 import {
@@ -172,7 +173,7 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
   // Non-blocking — email failure shouldn't fail registration
 
   try {
-    await sendVerificationEmail(user.email, user.displayName, verifyToken);
+    await sendVerificationEmail(user.email, user.displayName, verifyToken, resolveClientBaseUrl(req));
   } catch (emailError) {
     console.error("[Auth] Failed to send verification email:", emailError);
     // Continue — user can resend later
@@ -455,7 +456,7 @@ export const verifyEmail = asyncHandler(async (req: Request, res: Response) => {
   // ── 5. Send welcome email ─────────────────────
 
   try {
-    await sendWelcomeEmail(user.email, user.displayName);
+    await sendWelcomeEmail(user.email, user.displayName, resolveClientBaseUrl(req));
   } catch (error) {
     console.error("[Auth] Failed to send welcome email:", error);
   }
@@ -553,7 +554,7 @@ export const resendVerification = asyncHandler(async (req: Request, res: Respons
   // ── 5. Send email ──────────────────────────────
 
   try {
-    await sendVerificationEmail(user.email, user.displayName, newToken);
+    await sendVerificationEmail(user.email, user.displayName, newToken, resolveClientBaseUrl(req));
   } catch (error) {
     console.error("[Auth] Failed to resend verification email:", error);
     return sendServerError(res, "Failed to send email — please try again later");
@@ -660,7 +661,7 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response) =
   // ── 6. Send email ─────────────────────────────
 
   try {
-    await sendPasswordResetEmail(user.email, user.displayName, resetToken);
+    await sendPasswordResetEmail(user.email, user.displayName, resetToken, resolveClientBaseUrl(req));
   } catch (error) {
     console.error("[Auth] Failed to send password reset email:", error);
     // Roll back the token so the user isn't stuck with an unsent token

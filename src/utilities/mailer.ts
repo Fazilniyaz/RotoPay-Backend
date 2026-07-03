@@ -7,6 +7,15 @@
 import nodemailer, { Transporter } from "nodemailer";
 import { env } from "./env";
 
+// Ensure a base URL ends in exactly one "/" so links can be built by simple
+// concatenation for both http(s) URLs and custom schemes (e.g. rotopay://).
+// Callers pass the per-request base from resolveClientBaseUrl(); when omitted
+// we fall back to env.CLIENT_URL to preserve legacy behaviour.
+const clientBase = (baseUrl?: string): string => {
+  const url = baseUrl ?? env.CLIENT_URL;
+  return url.endsWith("/") ? url : `${url}/`;
+};
+
 // ── Transporter Singleton ──────────────────────
 
 let transporter: Transporter | null = null;
@@ -112,9 +121,10 @@ function baseTemplate(content: string): string {
 export async function sendVerificationEmail(
   to: string,
   displayName: string | null,
-  token: string
+  token: string,
+  clientBaseUrl?: string
 ): Promise<void> {
-  const verifyUrl = `${env.CLIENT_URL}/auth/verify-email?token=${token}`;
+  const verifyUrl = `${clientBase(clientBaseUrl)}auth/verify-email?token=${token}`;
   const name = displayName ?? "there";
 
   const html = baseTemplate(`
@@ -141,9 +151,10 @@ export async function sendVerificationEmail(
 export async function sendPasswordResetEmail(
   to: string,
   displayName: string | null,
-  token: string
+  token: string,
+  clientBaseUrl?: string
 ): Promise<void> {
-  const resetUrl = `${env.CLIENT_URL}/auth/reset-password?token=${token}`;
+  const resetUrl = `${clientBase(clientBaseUrl)}auth/reset-password?token=${token}`;
   const name = displayName ?? "there";
 
   const html = baseTemplate(`
@@ -169,9 +180,11 @@ export async function sendPasswordResetEmail(
 
 export async function sendWelcomeEmail(
   to: string,
-  displayName: string | null
+  displayName: string | null,
+  clientBaseUrl?: string
 ): Promise<void> {
   const name = displayName ?? "there";
+  const dashboardUrl = `${clientBase(clientBaseUrl)}dashboard`;
 
   const html = baseTemplate(`
     <p>Hi ${name},</p>
@@ -184,7 +197,7 @@ export async function sendWelcomeEmail(
       <li>View earnings reports</li>
     </ul>
     <div class="btn-wrap">
-      <a href="${env.CLIENT_URL}/dashboard" class="btn">Go to Dashboard</a>
+      <a href="${dashboardUrl}" class="btn">Go to Dashboard</a>
     </div>
   `);
 
@@ -192,6 +205,6 @@ export async function sendWelcomeEmail(
     to,
     subject: "Welcome to RotaPay — Your account is ready!",
     html,
-    text: `Hi ${name},\n\nYour RotaPay account is now active. Head to your dashboard: ${env.CLIENT_URL}/dashboard`,
+    text: `Hi ${name},\n\nYour RotaPay account is now active. Head to your dashboard: ${dashboardUrl}`,
   });
 }
