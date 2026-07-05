@@ -8,8 +8,9 @@
 // PATCH  /api/calendar/:id    update
 // DELETE /api/calendar/:id    delete
 //
-// Shifts themselves are drawn on the calendar from /api/shifts — this model
-// holds the user's own custom day notes (gym session, holiday, …).
+// A `type="shift"` entry is an ASSIGNMENT — it puts a shift preset onto a day and
+// is the record of one worked occurrence. Assignments carry the reminder for that
+// day; events/memos are the user's own custom day notes.
 // ─────────────────────────────────────────────
 
 import { Request, Response } from "express";
@@ -19,18 +20,19 @@ import { prisma } from "../utilities/prisma.client";
 import { asyncHandler } from "../helpers/async.handler";
 import { sendSuccess, sendCreated, sendNotFound, sendError } from "../helpers/api.response";
 import { CreateCalendarInput, UpdateCalendarInput } from "../helpers/calendar.validation";
+import { scheduleShiftReminder, cancelShiftReminders } from "../helpers/notification.service";
 
 const entryInclude = {
   shift: {
     select: {
       id: true,
       shiftName: true,
-      date: true,
       startTime: true,
       endTime: true,
       totalHours: true,
       shiftType: true,
-      status: true,
+      color: true,
+      employerId: true,
     },
   },
 };
@@ -38,6 +40,14 @@ const entryInclude = {
 // Confirm an employer belongs to the user (for employee-scoped entries).
 async function ownsEmployer(userId: string, employerId: string): Promise<boolean> {
   return (await prisma.employer.count({ where: { id: employerId, userId } })) > 0;
+}
+
+// Combine an assignment's day with a preset's time-of-day into the real start
+// moment on that day (used to schedule the "starts in an hour" reminder).
+function assignmentStart(day: Date, shiftStart: Date): Date {
+  const d = new Date(day);
+  const t = new Date(shiftStart);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), t.getHours(), t.getMinutes(), 0, 0);
 }
 
 // ─────────────────────────────────────────────
@@ -48,9 +58,14 @@ export const createCalendarEntry = asyncHandler(async (req: Request, res: Respon
   const userId = req.user!.userId;
   const body = req.body as CreateCalendarInput;
 
+  // The preset being assigned (needed for its time-of-day → reminder).
+  let shiftForReminder: { startTime: Date; shiftName: string | null; shiftType: string | null } | null = null;
   if (body.shiftId) {
-    const owns = await prisma.shift.count({ where: { id: body.shiftId, userId } });
-    if (!owns) {
+    shiftForReminder = await prisma.shift.findFirst({
+      where: { id: body.shiftId, userId },
+      select: { startTime: true, shiftName: true, shiftType: true },
+    });
+    if (!shiftForReminder) {
       sendError(res, "Shift not found", 404);
       return;
     }
@@ -72,6 +87,18 @@ export const createCalendarEntry = asyncHandler(async (req: Request, res: Respon
     },
     include: entryInclude,
   });
+
+  // Assigning a preset onto a day schedules its "starts in an hour" reminder for
+  // that day's start moment (if still in the future).
+  if (entry.type === "shift" && entry.shiftId && shiftForReminder) {
+    const label = shiftForReminder.shiftName || shiftForReminder.shiftType || "Shift";
+    await scheduleShiftReminder(
+      userId,
+      entry.shiftId,
+      assignmentStart(entry.date, shiftForReminder.startTime),
+      label
+    );
+  }
 
   sendCreated(res, "Calendar entry created successfully", entry);
 });
@@ -187,5 +214,11 @@ export const deleteCalendarEntry = asyncHandler(async (req: Request, res: Respon
   }
 
   await prisma.calendarEntry.delete({ where: { id } });
+
+  // Unassigning a shift drops its pending (not-yet-delivered) reminder.
+  if (existing.type === "shift" && existing.shiftId) {
+    await cancelShiftReminders(userId, existing.shiftId);
+  }
+
   sendSuccess(res, "Calendar entry deleted successfully");
 });

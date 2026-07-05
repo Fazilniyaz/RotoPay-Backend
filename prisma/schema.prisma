@@ -44,7 +44,6 @@ model User {
   shifts          Shift[]
   salaries        Salary[]
   clockSessions   ClockSession[]
-  events          Event[]
   calendarEntries CalendarEntry[]
   notifications   Notification[]
   sessions        Session[]
@@ -118,8 +117,6 @@ model UserSettings {
   // 12-hour AM/PM by default; the user can switch to 24h in Settings.
   timeFormat             String   @default("12h")
   notifyShiftReminder    Boolean  @default(true)
-  notifyEventReminder    Boolean  @default(true)
-  notifyBirthdayReminder Boolean  @default(true)
   // How many months back a report export covers (1–3). Optional so existing
   // settings docs don't break on read; defaults to 1 in the controller.
   reportMonths           Int?
@@ -144,7 +141,10 @@ model Employer {
   updatedAt     DateTime @updatedAt
 
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  // Employer and Shift are INDEPENDENT — they connect only through Salary.
+  // A shift preset is assigned to exactly one employee. Deleting the employee
+  // sets shift.employerId to null (the preset itself is kept).
+  shifts          Shift[]
+  // Wages still carry the employer too (auto-derived from the shift's employer).
   // Deleting an employer sets salary.employerId to null (salary rows are kept).
   salaries        Salary[]
   clockSessions   ClockSession[]
@@ -155,49 +155,44 @@ model Employer {
 }
 
 // ──────────────── SHIFT ────────────────
-
-// Lifecycle status, DERIVED from the shift's `date` + start/end times vs now:
-//   now <  start          → upcoming  (isActive=false)
-//   start <= now <= end   → isActive  (isActive=true)
-//   now >  end            → completed (isActive=false)
-// (Note: `isActive` is both the boolean field below and the middle status.)
-enum ShiftStatus {
-  upcoming
-  isActive
-  completed
-}
+// A shift is a reusable PRESET / template (e.g. "Morning 9–5 for Fazil"), NOT a
+// single dated day. It has NO date of its own — `startTime`/`endTime` carry only
+// a time-of-day (stored against an arbitrary reference day; end <= start means
+// the shift runs past midnight). A preset is assigned onto specific calendar days
+// via CalendarEntry(type="shift"), and each such assignment is one worked
+// occurrence — that is what drives hours, pay, reports and the auto-clock.
+// A preset belongs to exactly ONE employee (employerId).
 
 model Shift {
   id            String       @id @default(auto()) @map("_id") @db.ObjectId
   userId        String       @db.ObjectId
   shiftName     String?
-  // A shift is a single calendar day. Times below are combined with this date
-  // (end-time <= start-time means the shift runs past midnight).
-  date          DateTime
+  // Time-of-day only — the date component is meaningless for a preset.
   startTime     DateTime
   endTime       DateTime
   totalHours    Float
   // Free-form type: day | night | rotational, OR a user-supplied custom label.
   shiftType     String?
   // Label colour chosen when the shift is created; the calendar renders shift
-  // entries in this colour (events/memos keep their own calendar colour).
+  // assignments in this colour (events/memos keep their own calendar colour).
   color         String?
-  status        ShiftStatus?
-  isActive      Boolean?
+  // The single employee this preset is allocated to.
+  employerId    String?      @db.ObjectId
   isManualEntry Boolean      @default(false)
   notes         String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  // A shift can have MANY salary (wage) rows — one per assigned employer/value.
-  // Deleting a shift sets salary.shiftId to null (salary rows are kept).
+  employer Employer? @relation(fields: [employerId], references: [id], onDelete: SetNull)
+  // Deleting a preset also deletes its wages and its calendar assignments
+  // (both are meaningless without it — onDelete: Cascade on those relations).
   salaries        Salary[]
   calendarEntries CalendarEntry[]
   clockSessions   ClockSession[]
 
   @@index([userId])
-  @@index([userId, date])
+  @@index([userId, employerId])
   @@map("shifts")
 }
 
@@ -222,7 +217,9 @@ model CalendarEntry {
   updatedAt DateTime @updatedAt
 
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  shift    Shift?    @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  // A `type="shift"` entry (assignment) is meaningless without its preset — it is
+  // removed when the shift is deleted.
+  shift    Shift?    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
   employer Employer? @relation(fields: [employerId], references: [id], onDelete: Cascade)
 
   @@index([userId])
@@ -232,11 +229,10 @@ model CalendarEntry {
 }
 
 // ──────────────── SALARY ────────────────
-// Independent link entity — the ONLY thing connecting a Shift and an Employer.
-// Holds the pay value for one employer on one shift. A shift may have several
-// of these (multiple employers). shiftId / employerId are nullable and are set
-// to null (NOT cascaded) when the shift / employer is deleted, so the salary
-// record and its value are always preserved.
+// The wage (hourly rate) for a shift PRESET; its employee is the shift's employer.
+// A wage is meaningless without its preset (pay = rate × the preset's hours), so
+// deleting the shift DELETES its wages (onDelete: Cascade). When the EMPLOYER is
+// deleted the wage is kept with employerId set to null (it still has its shift).
 
 model Salary {
   id            String   @id @default(auto()) @map("_id") @db.ObjectId
@@ -255,7 +251,7 @@ model Salary {
   updatedAt     DateTime @updatedAt
 
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  shift         Shift?         @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  shift         Shift?         @relation(fields: [shiftId], references: [id], onDelete: Cascade)
   employer      Employer?      @relation(fields: [employerId], references: [id], onDelete: SetNull)
   clockSessions ClockSession[]
 
@@ -297,33 +293,6 @@ model ClockSession {
   @@index([userId, status])
   @@index([shiftId])
   @@map("clock_sessions")
-}
-
-// ──────────────── EVENT ────────────────
-
-model Event {
-  id               String    @id @default(auto()) @map("_id") @db.ObjectId
-  userId           String    @db.ObjectId
-  title            String
-  description      String?
-  type             String
-  date             DateTime
-  endDate          DateTime?
-  isAllDay         Boolean   @default(false)
-  isRecurring      Boolean   @default(false)
-  recurringPattern String?
-  reminderEnabled  Boolean   @default(false)
-  reminderMinutes  Int?
-  color            String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([userId, date])
-  @@index([userId, type])
-  @@map("events")
 }
 
 // ──────────────── NOTIFICATION ────────────────

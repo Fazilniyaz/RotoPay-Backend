@@ -2,66 +2,41 @@
 // ─────────────────────────────────────────────
 // Shift Controller — CRUD + analytics
 //
-// POST   /api/shifts            create
-// GET    /api/shifts            list (filter + search + paginate + summary)
+// POST   /api/shifts            create a preset
+// GET    /api/shifts            list presets (filter + search + paginate + summary)
 // GET    /api/shifts/analytics  dashboard totals
 // GET    /api/shifts/:id        read one
 // PATCH  /api/shifts/:id        update
 // DELETE /api/shifts/:id        delete (wage rows kept, shiftId set to null)
 //
-// A shift is a SINGLE day (`date`) + start/end times. STATUS / isActive are
-// DERIVED from those vs the current moment (overnight-aware), stored on write
-// and re-derived on every read — always current, no cron needed.
+// A shift is a reusable PRESET — a time-of-day window + one employee, with NO
+// date of its own. It is assigned onto specific days via CalendarEntry(type=
+// "shift"); each assignment is one worked occurrence. Hours / pay are realised
+// from those assignments, NOT from the preset itself.
 //
-// Creating a shift only affects TOTAL HOURS. Pay ("This Month Pay" / "Total
-// Pay") is realised separately via /api/payments (marking a month as paid).
+// Duplicate rule: a user may not have two presets with the SAME employee AND the
+// SAME start/end time-of-day.
 // ─────────────────────────────────────────────
 
 import { Request, Response } from "express";
-import { Prisma, ShiftStatus } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import { prisma } from "../utilities/prisma.client";
 import { asyncHandler } from "../helpers/async.handler";
 import { parsePagination } from "../helpers/validators";
 import { sendSuccess, sendCreated, sendNotFound, sendError } from "../helpers/api.response";
 import { CreateShiftInput, UpdateShiftInput } from "../helpers/shift.validation";
-import {
-  scheduleShiftReminder,
-  cancelShiftReminders,
-} from "../helpers/notification.service";
+import { cancelShiftReminders } from "../helpers/notification.service";
 
-const shiftLabel = (s: { shiftName: string | null; shiftType: string | null }) =>
-  s.shiftName || s.shiftType || "Shift";
-
-// Each wage row brings along its employer's basic info.
+// The preset carries its employee + each wage row's employer basic info.
 const shiftInclude = {
+  employer: { select: { id: true, store: true, employerName: true } },
   salaries: {
     include: { employer: { select: { id: true, store: true, employerName: true } } },
   },
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-// ── Derive status + isActive from the shift's real start/end moments ──
-// startTime/endTime already carry the full datetime; if end <= start the shift
-// runs past midnight, so the end is on the following day.
-function deriveStatus(
-  startTime: Date,
-  endTime: Date,
-  now: Date = new Date()
-): { status: ShiftStatus; isActive: boolean } {
-  const start = new Date(startTime);
-  let end = new Date(endTime);
-  if (end <= start) end = new Date(end.getTime() + DAY_MS);
-  if (now < start) return { status: ShiftStatus.upcoming, isActive: false };
-  if (now > end) return { status: ShiftStatus.completed, isActive: false };
-  return { status: ShiftStatus.isActive, isActive: true };
-}
-
-// Re-derive status/isActive on a fetched record so the response is always current.
-function withCurrentStatus<T extends { startTime: Date; endTime: Date }>(shift: T): T {
-  return { ...shift, ...deriveStatus(shift.startTime, shift.endTime) };
-}
 
 // Absolute [startMs, endMs] for a shift's times (overnight-aware: end<=start ⇒ +1 day).
 function intervalMs(startTime: Date, endTime: Date): [number, number] {
@@ -78,8 +53,20 @@ function hoursBetween(startTime: Date, endTime: Date): number {
   return Math.round(((end - start) / 3_600_000) * 100) / 100;
 }
 
+// Minutes-since-midnight for a time-of-day — used to compare preset timings
+// regardless of the (meaningless) date component.
+function minsOfDay(d: Date): number {
+  const dt = new Date(d);
+  return dt.getHours() * 60 + dt.getMinutes();
+}
+
+// Confirm an employer belongs to the user.
+async function ownsEmployer(userId: string, employerId: string): Promise<boolean> {
+  return (await prisma.employer.count({ where: { id: employerId, userId } })) > 0;
+}
+
 // Re-derive each linked wage's total (= hourlyPayRate × totalHours) after a
-// shift's hours change, so "This Month Pay"/"Total Pay" stay accurate.
+// shift's hours change, so pay stays accurate.
 async function syncSalariesForShift(userId: string, shiftId: string, totalHours: number): Promise<void> {
   const wages = await prisma.salary.findMany({
     where: { userId, shiftId },
@@ -97,30 +84,22 @@ async function syncSalariesForShift(userId: string, shiftId: string, totalHours:
   );
 }
 
-// True if the given time range overlaps any existing shift on the same day.
-async function hasTimeConflict(
+// True if the user already has a preset for this employee with the same start/end
+// time-of-day (excludeId lets update skip the record being edited).
+async function hasDuplicatePreset(
   userId: string,
-  date: Date,
+  employerId: string,
   startTime: Date,
   endTime: Date,
   excludeId?: string
 ): Promise<boolean> {
-  const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const dayEnd = new Date(dayStart.getTime() + DAY_MS);
-  const sameDay = await prisma.shift.findMany({
-    where: {
-      userId,
-      date: { gte: dayStart, lt: dayEnd },
-      ...(excludeId && { id: { not: excludeId } }),
-    },
+  const siblings = await prisma.shift.findMany({
+    where: { userId, employerId, ...(excludeId && { id: { not: excludeId } }) },
     select: { startTime: true, endTime: true },
   });
-  const [ns, ne] = intervalMs(startTime, endTime);
-  // Half-open overlap: two intervals clash when each starts before the other ends.
-  return sameDay.some((s) => {
-    const [es, ee] = intervalMs(s.startTime, s.endTime);
-    return ns < ee && es < ne;
-  });
+  const s = minsOfDay(startTime);
+  const e = minsOfDay(endTime);
+  return siblings.some((sh) => minsOfDay(sh.startTime) === s && minsOfDay(sh.endTime) === e);
 }
 
 // ─────────────────────────────────────────────
@@ -131,99 +110,68 @@ export const createShift = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const body = req.body as CreateShiftInput;
 
-  // A shift is always "today" — the UI omits the date; validation already rejects
-  // any non-today date if one is sent.
-  const shiftDate = body.date ?? new Date();
-  // Hours are the single source of truth for pay — always derived from the times.
-  const totalHours = hoursBetween(body.startTime, body.endTime);
-
-  // Reject overlapping shifts on the same day.
-  if (await hasTimeConflict(userId, shiftDate, body.startTime, body.endTime)) {
-    sendError(res, "This time overlaps a shift you already have today", 409);
+  if (!(await ownsEmployer(userId, body.employerId))) {
+    sendError(res, "Employee not found", 404);
     return;
   }
 
-  const { status, isActive } = deriveStatus(body.startTime, body.endTime);
+  // Hours are the single source of truth for pay — always derived from the times.
+  const totalHours = hoursBetween(body.startTime, body.endTime);
+
+  if (await hasDuplicatePreset(userId, body.employerId, body.startTime, body.endTime)) {
+    sendError(
+      res,
+      "Same shift is already allocated to this employee — change the timings or the employee.",
+      409
+    );
+    return;
+  }
 
   const shift = await prisma.shift.create({
     data: {
       userId,
       shiftName: body.shiftName ?? null,
-      date: shiftDate,
       startTime: body.startTime,
       endTime: body.endTime,
       totalHours,
       shiftType: body.shiftType,
       color: body.color ?? null,
-      status,
-      isActive,
+      employerId: body.employerId,
       isManualEntry: body.isManualEntry ?? false,
       notes: body.notes ?? null,
     },
     include: shiftInclude,
   });
 
-  // Only the 1-hour reminder is surfaced for shifts (see notification spec).
-  await scheduleShiftReminder(userId, shift.id, shift.startTime, shiftLabel(shift));
-
-  sendCreated(res, "Shift created successfully", withCurrentStatus(shift));
+  sendCreated(res, "Shift created successfully", shift);
 });
 
 // ─────────────────────────────────────────────
 // LIST — GET /api/shifts
-// Query: ?status=&search=&employerId=&shiftType=&from=&to=&page=&limit=
-//   status ∈ upcoming|isActive|completed (translated to day-bounded date filters)
+// Query: ?search=&employerId=&shiftType=&page=&limit=
 //   search matches notes (case-insensitive)
 // ─────────────────────────────────────────────
 
 export const getShifts = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const { page, limit, skip } = parsePagination(req.query);
-  const now = new Date();
 
   const where: Prisma.ShiftWhereInput = { userId };
-  const and: Prisma.ShiftWhereInput[] = [];
 
-  // Free-form shift type (presets or custom label), exact match.
   if (typeof req.query.shiftType === "string" && req.query.shiftType.trim()) {
     where.shiftType = req.query.shiftType.trim();
   }
-
-  if (typeof req.query.employerId === "string") {
-    where.salaries = { some: { employerId: req.query.employerId } };
+  if (typeof req.query.employerId === "string" && req.query.employerId.trim()) {
+    where.employerId = req.query.employerId.trim();
   }
-
-  // status → day-bounded date conditions
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-  const status = req.query.status;
-  if (status === "upcoming") and.push({ date: { gt: endOfToday } });
-  else if (status === "completed") and.push({ date: { lt: startOfToday } });
-  else if (status === "isActive") and.push({ date: { gte: startOfToday, lte: endOfToday } });
-
-  // search (notes)
   if (typeof req.query.search === "string" && req.query.search.trim()) {
     where.notes = { contains: req.query.search.trim(), mode: "insensitive" };
   }
 
-  // date range on `date`
-  const dateFilter: Prisma.DateTimeFilter = {};
-  if (typeof req.query.from === "string") {
-    const from = new Date(req.query.from);
-    if (!isNaN(from.getTime())) dateFilter.gte = from;
-  }
-  if (typeof req.query.to === "string") {
-    const to = new Date(req.query.to);
-    if (!isNaN(to.getTime())) dateFilter.lte = to;
-  }
-  if (Object.keys(dateFilter).length > 0) and.push({ date: dateFilter });
-
-  if (and.length > 0) where.AND = and;
-
   const [shifts, total, summary] = await Promise.all([
     prisma.shift.findMany({
       where,
-      orderBy: { date: "desc" },
+      orderBy: { createdAt: "desc" },
       skip,
       take: limit,
       include: shiftInclude,
@@ -232,7 +180,7 @@ export const getShifts = asyncHandler(async (req: Request, res: Response) => {
     prisma.shift.aggregate({ where, _sum: { totalHours: true } }),
   ]);
 
-  sendSuccess(res, "Shifts fetched successfully", shifts.map(withCurrentStatus), 200, {
+  sendSuccess(res, "Shifts fetched successfully", shifts, 200, {
     page,
     limit,
     total,
@@ -243,33 +191,57 @@ export const getShifts = asyncHandler(async (req: Request, res: Response) => {
 
 // ─────────────────────────────────────────────
 // ANALYTICS — GET /api/shifts/analytics
-// Total hours come from shifts; pay comes from PaidMonth snapshots (a month's
-// pay is only realised once the user marks it paid on the calendar).
+// totalHours + thisMonthPay accumulate over THIS MONTH's calendar assignments
+// (each assignment of a preset to a day adds its hours + wage; removing one
+// subtracts). They RESET to 0 once the current month is marked paid — that pay
+// has moved into totalPay (accumulated PaidMonth snapshots). Native Pay (client)
+// = thisMonthPay converted. Next month starts fresh from 0.
 // ─────────────────────────────────────────────
 
 export const getShiftAnalytics = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.userId;
 
   const now = new Date();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const year = now.getFullYear();
-  const month = now.getMonth() + 1;
+  const month = now.getMonth() + 1; // 1–12
+  const startOfMonth = new Date(year, month - 1, 1);
+  const endOfMonth = new Date(year, month, 1);
 
-  const sumHours = (where: Prisma.ShiftWhereInput) =>
-    prisma.shift.aggregate({ where, _sum: { totalHours: true } });
-
-  const [hoursAll, hoursMonth, payTotal, payThisMonth] = await Promise.all([
-    sumHours({ userId }),
-    sumHours({ userId, date: { gte: startOfMonth } }),
-    prisma.paidMonth.aggregate({ where: { userId }, _sum: { amount: true } }),
+  const [currentPaid, monthAssignments, payTotal] = await Promise.all([
+    // Is the CURRENT month already paid? If so, its figures have reset to 0.
     prisma.paidMonth.findUnique({ where: { userId_year_month: { userId, year, month } } }),
+    prisma.calendarEntry.findMany({
+      where: { userId, type: "shift", shiftId: { not: null }, date: { gte: startOfMonth, lt: endOfMonth } },
+      select: { shiftId: true },
+    }),
+    prisma.paidMonth.aggregate({ where: { userId }, _sum: { amount: true } }),
   ]);
 
+  // Sum this month's assignment hours + wages (skip entirely once paid).
+  let totalHours = 0;
+  let thisMonthPay = 0;
+  if (!currentPaid && monthAssignments.length > 0) {
+    const ids = Array.from(new Set(monthAssignments.map((a) => a.shiftId).filter(Boolean))) as string[];
+    const shifts = await prisma.shift.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, totalHours: true, salaries: { select: { salary: true } } },
+    });
+    const hoursById = new Map(shifts.map((s) => [s.id, s.totalHours ?? 0]));
+    const wageById = new Map(
+      shifts.map((s) => [s.id, (s.salaries ?? []).reduce((a, w) => a + (w.salary ?? 0), 0)])
+    );
+    for (const a of monthAssignments) {
+      totalHours += hoursById.get(a.shiftId as string) ?? 0;
+      thisMonthPay += wageById.get(a.shiftId as string) ?? 0;
+    }
+  }
+
+  const roundedHours = Math.round(totalHours * 100) / 100;
   sendSuccess(res, "Shift analytics fetched successfully", {
-    totalHours: hoursAll._sum.totalHours ?? 0,
-    thisMonthHours: hoursMonth._sum.totalHours ?? 0,
+    totalHours: roundedHours,
+    thisMonthHours: roundedHours,
     totalPay: payTotal._sum.amount ?? 0,
-    thisMonthPay: payThisMonth?.amount ?? 0,
+    thisMonthPay: Math.round(thisMonthPay * 100) / 100,
   });
 });
 
@@ -287,11 +259,11 @@ export const getShiftById = asyncHandler(async (req: Request, res: Response) => 
     return;
   }
 
-  sendSuccess(res, "Shift fetched successfully", withCurrentStatus(shift));
+  sendSuccess(res, "Shift fetched successfully", shift);
 });
 
 // ─────────────────────────────────────────────
-// UPDATE — PATCH /api/shifts/:id  (shift fields only)
+// UPDATE — PATCH /api/shifts/:id  (preset fields only)
 // ─────────────────────────────────────────────
 
 export const updateShift = asyncHandler(async (req: Request, res: Response) => {
@@ -305,55 +277,62 @@ export const updateShift = asyncHandler(async (req: Request, res: Response) => {
     return;
   }
 
-  // Recompute status/isActive + hours from the merged times.
+  if (body.employerId !== undefined && !(await ownsEmployer(userId, body.employerId))) {
+    sendError(res, "Employee not found", 404);
+    return;
+  }
+
   const startTime = body.startTime ?? existing.startTime;
   const endTime = body.endTime ?? existing.endTime;
-  const shiftDate = body.date ?? existing.date;
+  const employerId = body.employerId ?? existing.employerId;
 
-  // Re-check conflicts only when the timing/day actually changed.
+  // Re-check the duplicate rule when timing or employee changed.
   if (
-    (body.startTime !== undefined || body.endTime !== undefined || body.date !== undefined) &&
-    (await hasTimeConflict(userId, shiftDate, startTime, endTime, id))
+    employerId &&
+    (body.startTime !== undefined || body.endTime !== undefined || body.employerId !== undefined) &&
+    (await hasDuplicatePreset(userId, employerId, startTime, endTime, id))
   ) {
-    sendError(res, "This time overlaps another shift on that day", 409);
+    sendError(
+      res,
+      "Same shift is already allocated to this employee — change the timings or the employee.",
+      409
+    );
     return;
   }
 
   const totalHours = hoursBetween(startTime, endTime);
-  const { status, isActive } = deriveStatus(startTime, endTime);
 
   const shift = await prisma.shift.update({
     where: { id },
     data: {
-      status,
-      isActive,
       totalHours,
       ...(body.shiftName !== undefined && { shiftName: body.shiftName }),
-      ...(body.date !== undefined && { date: body.date }),
       ...(body.startTime !== undefined && { startTime: body.startTime }),
       ...(body.endTime !== undefined && { endTime: body.endTime }),
       ...(body.shiftType !== undefined && { shiftType: body.shiftType }),
       ...(body.color !== undefined && { color: body.color }),
+      ...(body.employerId !== undefined && { employerId: body.employerId }),
       ...(body.isManualEntry !== undefined && { isManualEntry: body.isManualEntry }),
       ...(body.notes !== undefined && { notes: body.notes }),
     },
     include: shiftInclude,
   });
 
-  // A shift's total hours changed ⇒ its derived wage totals change too. Keep the
-  // linked salary rows' derived `salary` (= hourlyPayRate × totalHours) in sync.
+  // Keep linked wages in sync: derived pay (rate × hours) and the auto-derived
+  // employer both follow the preset.
   await syncSalariesForShift(userId, shift.id, totalHours);
+  if (body.employerId !== undefined) {
+    await prisma.salary.updateMany({ where: { userId, shiftId: shift.id }, data: { employerId: body.employerId } });
+  }
 
-  // Refresh the reminder for the (possibly new) start time.
-  await cancelShiftReminders(userId, shift.id);
-  await scheduleShiftReminder(userId, shift.id, shift.startTime, shiftLabel(shift));
-
-  sendSuccess(res, "Shift updated successfully", withCurrentStatus(shift));
+  sendSuccess(res, "Shift updated successfully", shift);
 });
 
 // ─────────────────────────────────────────────
 // DELETE — DELETE /api/shifts/:id
-// Wage rows are KEPT — their shiftId is set to null (schema onDelete: SetNull).
+// Deleting a preset cascades to its wages AND its calendar assignments (schema
+// onDelete: Cascade) — both are meaningless without the preset, so the employee's
+// shift count and total pay drop accordingly.
 // ─────────────────────────────────────────────
 
 export const deleteShift = asyncHandler(async (req: Request, res: Response) => {
@@ -366,8 +345,15 @@ export const deleteShift = asyncHandler(async (req: Request, res: Response) => {
     return;
   }
 
+  // A preset's wages and calendar assignments are meaningless without it — remove
+  // them so the employee's shift count AND total pay drop. (The schema also
+  // declares these relations onDelete: Cascade; doing it explicitly guarantees the
+  // behaviour regardless of the generated client's referential-action metadata.)
+  await prisma.salary.deleteMany({ where: { userId, shiftId: id } });
+  await prisma.calendarEntry.deleteMany({ where: { userId, shiftId: id } });
   await prisma.shift.delete({ where: { id } });
 
+  // Drop any pending reminders scheduled for this preset's assignments.
   await cancelShiftReminders(userId, id);
 
   sendSuccess(res, "Shift deleted successfully");

@@ -26,7 +26,6 @@ const appData = [
   ["salary", () => prisma.salary.deleteMany({})],
   ["shift", () => prisma.shift.deleteMany({})],
   ["employer", () => prisma.employer.deleteMany({})],
-  ["event", () => prisma.event.deleteMany({})],
   ["notification", () => prisma.notification.deleteMany({})],
   ["paidMonth", () => prisma.paidMonth.deleteMany({})],
   ["report", () => prisma.report.deleteMany({})],

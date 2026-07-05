@@ -6,9 +6,10 @@
 // POST   /api/payments/mark   mark a month paid (snapshots that month's pay)
 // DELETE /api/payments        unmark a month
 //
-// A paid month's `amount` is the sum of the wage values of all shifts whose
-// `date` falls in that month, snapshotted at mark time. Drives the shift
-// module's "This Month Pay" and "Total Pay" tabs.
+// Marking a month paid snapshots THAT MONTH's pay = the sum of the wages of every
+// shift assigned to a day in that month (matching the live "This Month Pay" tab).
+// It moves into the running "Total Pay"; unmarking removes it. Once the current
+// month is paid, its Total Hours / This Month Pay reset to 0 (see shift analytics).
 // ─────────────────────────────────────────────
 
 import { Request, Response } from "express";
@@ -24,15 +25,31 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
-// Sum wage values of all shifts whose date falls in the given month.
+// Sum the wage of every shift ASSIGNED to a day in the given month (per-day
+// multiplicity). Snapshotted into PaidMonth so past months keep their amount.
 async function computeMonthAmount(userId: string, year: number, month: number): Promise<number> {
   const start = new Date(year, month - 1, 1);
   const end = new Date(year, month, 1); // exclusive upper bound
-  const agg = await prisma.salary.aggregate({
-    where: { userId, shift: { is: { date: { gte: start, lt: end } } } },
-    _sum: { salary: true },
+
+  const assignments = await prisma.calendarEntry.findMany({
+    where: { userId, type: "shift", shiftId: { not: null }, date: { gte: start, lt: end } },
+    select: { shiftId: true },
   });
-  return agg._sum.salary ?? 0;
+  if (assignments.length === 0) return 0;
+
+  const shiftIds = Array.from(new Set(assignments.map((a) => a.shiftId).filter(Boolean))) as string[];
+  const wages = await prisma.salary.findMany({
+    where: { userId, shiftId: { in: shiftIds } },
+    select: { shiftId: true, salary: true },
+  });
+  const wageByShift = new Map<string, number>();
+  for (const w of wages) {
+    if (!w.shiftId) continue;
+    wageByShift.set(w.shiftId, (wageByShift.get(w.shiftId) ?? 0) + (w.salary ?? 0));
+  }
+  let amount = 0;
+  for (const a of assignments) amount += wageByShift.get(a.shiftId as string) ?? 0;
+  return Math.round(amount * 100) / 100;
 }
 
 // ─────────────────────────────────────────────

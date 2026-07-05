@@ -26,24 +26,34 @@ const salaryInclude = {
     select: {
       id: true,
       shiftName: true,
-      date: true,
       startTime: true,
       endTime: true,
       totalHours: true,
       shiftType: true,
-      status: true,
+      color: true,
+      employerId: true,
     },
   },
   employer: { select: { id: true, store: true, employerName: true } },
 };
 
-// Confirm a shift / employer belongs to the user. Returns false if an id was
-// given but isn't owned (so the caller can 404).
+// Confirm a shift belongs to the user. Returns false if an id was given but
+// isn't owned (so the caller can 404).
 async function ownsShift(userId: string, shiftId: string): Promise<boolean> {
   return (await prisma.shift.count({ where: { id: shiftId, userId } })) > 0;
 }
-async function ownsEmployer(userId: string, employerId: string): Promise<boolean> {
-  return (await prisma.employer.count({ where: { id: employerId, userId } })) > 0;
+
+// The wage's employee is auto-derived from its shift's employer (never chosen).
+async function employerOfShift(
+  userId: string,
+  shiftId: string | null | undefined
+): Promise<string | null> {
+  if (!shiftId) return null;
+  const shift = await prisma.shift.findFirst({
+    where: { id: shiftId, userId },
+    select: { employerId: true },
+  });
+  return shift?.employerId ?? null;
 }
 
 // Total pay = hourlyPayRate × the linked shift's totalHours (rounded to 2dp).
@@ -74,13 +84,11 @@ export const createSalary = asyncHandler(async (req: Request, res: Response) => 
     sendError(res, "Shift not found", 404);
     return;
   }
-  if (body.employerId && !(await ownsEmployer(userId, body.employerId))) {
-    sendError(res, "Employer not found", 404);
-    return;
-  }
 
   // The entered value is the hourly rate; the shift's hours derive the total pay.
   const total = await computeTotalFromRate(userId, body.shiftId, body.hourlyPayRate);
+  // Employee is inherited from the shift's employer, not chosen on the wage.
+  const employerId = await employerOfShift(userId, body.shiftId);
 
   const salary = await prisma.salary.create({
     data: {
@@ -88,7 +96,7 @@ export const createSalary = asyncHandler(async (req: Request, res: Response) => 
       salary: total,
       hourlyPayRate: body.hourlyPayRate,
       shiftId: body.shiftId ?? null,
-      employerId: body.employerId ?? null,
+      employerId,
       rateType: "hourly",
       currency: body.currency ?? null,
     },
@@ -174,10 +182,6 @@ export const updateSalary = asyncHandler(async (req: Request, res: Response) => 
     sendError(res, "Shift not found", 404);
     return;
   }
-  if (body.employerId && !(await ownsEmployer(userId, body.employerId))) {
-    sendError(res, "Employer not found", 404);
-    return;
-  }
 
   // Recompute the derived total from the merged shift + hourly rate.
   const effShiftId = body.shiftId !== undefined ? body.shiftId : existing.shiftId;
@@ -191,9 +195,11 @@ export const updateSalary = asyncHandler(async (req: Request, res: Response) => 
       ...(body.hourlyPayRate !== undefined && { hourlyPayRate: body.hourlyPayRate }),
       rateType: "hourly",
       ...(body.currency !== undefined && { currency: body.currency }),
-      // `shiftId`/`employerId` present in body (incl. null) → apply it.
-      ...(body.shiftId !== undefined && { shiftId: body.shiftId }),
-      ...(body.employerId !== undefined && { employerId: body.employerId }),
+      // The shift link may change (incl. null); the employee is re-derived from it.
+      ...(body.shiftId !== undefined && {
+        shiftId: body.shiftId,
+        employerId: await employerOfShift(userId, body.shiftId),
+      }),
     },
     include: salaryInclude,
   });

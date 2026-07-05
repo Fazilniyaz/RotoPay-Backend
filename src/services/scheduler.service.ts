@@ -2,16 +2,16 @@
 // ─────────────────────────────────────────────
 // Background scheduler — one tick per minute (functionally cron `* * * * *`).
 //
-// Responsibilities (only while a shift is "today"):
-//   • Auto clock-in   — when a shift's start time arrives and the user's
+// Responsibilities (driven by calendar ASSIGNMENTS — a shift preset put on a day):
+//   • Auto clock-in   — when an assignment's start time arrives and the user's
 //                       clockInType is "automatic": open a clock session and
 //                       notify "shift started, clocked in!".
-//   • Auto clock-out  — when the shift's end time passes: close that session,
+//   • Auto clock-out  — when the assignment's end time passes: close that session,
 //                       compute hours + earnings, notify "shift ended…".
-//   • Water reminder  — at the half-way point: notify once.
+//   • Water reminder  — at the half-way point: notify once per assignment.
 //
-// Everything is idempotent: auto sessions are keyed by shiftId (deduped), and the
-// water reminder checks for an existing notification before sending.
+// Idempotent: auto sessions are keyed by shiftId (deduped), and the water
+// reminder checks for an existing notification (keyed by the assignment id).
 // ─────────────────────────────────────────────
 
 import { prisma } from "../utilities/prisma.client";
@@ -20,10 +20,14 @@ import { emitNotification, NotificationType } from "../helpers/notification.serv
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TICK_MS = 60 * 1000;
 
-// Absolute [startMs, endMs] for a shift (overnight-aware).
-function intervalMs(startTime: Date, endTime: Date): [number, number] {
-  const start = new Date(startTime).getTime();
-  let end = new Date(endTime).getTime();
+// Absolute [startMs, endMs] for an assignment: the preset's time-of-day combined
+// with the assignment's day (overnight-aware: end<=start ⇒ end is next day).
+function occInterval(day: Date, startTime: Date, endTime: Date): [number, number] {
+  const d = new Date(day);
+  const s = new Date(startTime);
+  const e = new Date(endTime);
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), s.getHours(), s.getMinutes(), 0, 0).getTime();
+  let end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), e.getHours(), e.getMinutes(), 0, 0).getTime();
   if (end <= start) end += DAY_MS;
   return [start, end];
 }
@@ -32,24 +36,31 @@ async function tick(): Promise<void> {
   const now = Date.now();
   const nowDate = new Date(now);
 
-  // Candidate shifts: anything dated yesterday..today (covers overnight shifts).
+  // Candidate assignments: anything dated yesterday..today (covers overnight).
   const dayStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() - 1);
   const dayEnd = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + 1);
 
-  const shifts = await prisma.shift.findMany({
-    where: { date: { gte: dayStart, lt: dayEnd } },
+  const assignments = await prisma.calendarEntry.findMany({
+    where: { type: "shift", shiftId: { not: null }, date: { gte: dayStart, lt: dayEnd } },
     select: {
       id: true,
       userId: true,
-      startTime: true,
-      endTime: true,
-      salaries: { select: { id: true, employerId: true, hourlyPayRate: true } },
+      date: true,
+      shiftId: true,
+      shift: {
+        select: {
+          startTime: true,
+          endTime: true,
+          salaries: { select: { id: true, employerId: true, hourlyPayRate: true } },
+        },
+      },
       user: { select: { settings: { select: { clockInType: true, clockInOutEnabled: true } } } },
     },
   });
-  if (shifts.length === 0) return;
+  if (assignments.length === 0) return;
 
-  const shiftIds = shifts.map((s) => s.id);
+  const shiftIds = Array.from(new Set(assignments.map((a) => a.shiftId).filter(Boolean))) as string[];
+  const entryIds = assignments.map((a) => a.id);
 
   // Active auto sessions + already-sent water reminders, fetched in bulk.
   const [activeSessions, waterNotes] = await Promise.all([
@@ -58,28 +69,33 @@ async function tick(): Promise<void> {
       select: { id: true, shiftId: true, clockInTime: true, salary: { select: { hourlyPayRate: true } } },
     }),
     prisma.notification.findMany({
-      where: { type: NotificationType.SHIFT_WATER, relatedId: { in: shiftIds } },
+      where: { type: NotificationType.SHIFT_WATER, relatedId: { in: entryIds } },
       select: { relatedId: true },
     }),
   ]);
 
-  const activeByShift = new Map(activeSessions.map((s) => [s.shiftId ?? "", s]));
-  const wateredShifts = new Set(waterNotes.map((n) => n.relatedId));
+  type ActiveLite = { id: string; shiftId: string | null; clockInTime: Date; salary: { hourlyPayRate: number | null } | null };
+  const activeByShift = new Map<string, ActiveLite>(
+    activeSessions.map((s) => [s.shiftId ?? "", s as ActiveLite])
+  );
+  const watered = new Set(waterNotes.map((n) => n.relatedId));
 
-  for (const shift of shifts) {
-    const [startMs, endMs] = intervalMs(shift.startTime, shift.endTime);
-    const settings = shift.user.settings;
-    const autoEnabled = (settings?.clockInOutEnabled ?? true) && (settings?.clockInType ?? "automatic") === "automatic";
+  for (const a of assignments) {
+    if (!a.shift || !a.shiftId) continue;
+    const [startMs, endMs] = occInterval(a.date, a.shift.startTime, a.shift.endTime);
+    const settings = a.user.settings;
+    const autoEnabled =
+      (settings?.clockInOutEnabled ?? true) && (settings?.clockInType ?? "automatic") === "automatic";
     const isLive = now >= startMs && now <= endMs;
-    const active = activeByShift.get(shift.id);
+    const active = activeByShift.get(a.shiftId);
 
     // ── Auto clock-in ──
     if (autoEnabled && isLive && !active) {
-      const wage = shift.salaries[0];
+      const wage = a.shift.salaries[0];
       const session = await prisma.clockSession.create({
         data: {
-          userId: shift.userId,
-          shiftId: shift.id,
+          userId: a.userId,
+          shiftId: a.shiftId,
           salaryId: wage?.id ?? null,
           employerId: wage?.employerId ?? null,
           clockInTime: nowDate,
@@ -87,8 +103,15 @@ async function tick(): Promise<void> {
           isAutoCalculated: true,
         },
       });
+      // Track it so we don't clock the same preset in twice this tick.
+      activeByShift.set(a.shiftId, {
+        id: session.id,
+        shiftId: a.shiftId,
+        clockInTime: nowDate,
+        salary: wage ? { hourlyPayRate: wage.hourlyPayRate } : null,
+      });
       await emitNotification({
-        userId: shift.userId,
+        userId: a.userId,
         type: NotificationType.CLOCK_IN,
         title: "Shift started",
         message: "Shift started, clocked in!",
@@ -97,24 +120,28 @@ async function tick(): Promise<void> {
       });
     }
 
-    // ── Half-way water reminder (once) ──
-    if (isLive && now >= startMs + (endMs - startMs) / 2 && !wateredShifts.has(shift.id)) {
+    // ── Half-way water reminder (once per assignment) ──
+    if (isLive && now >= startMs + (endMs - startMs) / 2 && !watered.has(a.id)) {
+      watered.add(a.id);
       await emitNotification({
-        userId: shift.userId,
+        userId: a.userId,
         type: NotificationType.SHIFT_WATER,
         title: "Halfway there",
         message: "Take some water and continue the remaining shifts buddy!",
-        relatedId: shift.id,
+        relatedId: a.id,
         relatedType: "shift",
       });
     }
   }
 
-  // ── Auto clock-out: any active auto session whose shift has ended ──
-  for (const session of activeSessions) {
-    const shift = shifts.find((s) => s.id === session.shiftId);
-    if (!shift) continue;
-    const [, endMs] = intervalMs(shift.startTime, shift.endTime);
+  // ── Auto clock-out: any active auto session whose assignment has ended ──
+  const clockedOut = new Set<string>();
+  for (const a of assignments) {
+    if (!a.shift || !a.shiftId) continue;
+    const session = activeByShift.get(a.shiftId);
+    if (!session || clockedOut.has(session.id)) continue;
+    // Skip sessions opened this very tick (their occurrence hasn't ended).
+    const [, endMs] = occInterval(a.date, a.shift.startTime, a.shift.endTime);
     if (now <= endMs) continue;
 
     const totalHours = Math.max(0, Math.round(((now - session.clockInTime.getTime()) / 3_600_000) * 100) / 100);
@@ -125,8 +152,9 @@ async function tick(): Promise<void> {
       where: { id: session.id },
       data: { clockOutTime: nowDate, totalHours, earnings, status: "completed" },
     });
+    clockedOut.add(session.id);
     await emitNotification({
-      userId: shift.userId,
+      userId: a.userId,
       type: NotificationType.CLOCK_OUT,
       title: "Shift ended",
       message: "Shift ended, clocked out!",

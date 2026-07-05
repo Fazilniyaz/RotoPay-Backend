@@ -2,10 +2,9 @@
 // ─────────────────────────────────────────────
 // Zod Validation Schemas — Salary Module
 //
-// A Salary row links a Shift to an Employer and carries the pay value.
-// Both shiftId and employerId are optional (a row can be created/edited with
-// either side detached), but `salary` (the value) is always required on create.
-// On update, passing null for shiftId/employerId clears that link.
+// A Salary row is the wage (hourly rate) for a shift preset. The employee is NO
+// LONGER chosen here — it is auto-derived from the linked shift's employer. The
+// client sends only shiftId + rate (+ currency); any employerId is ignored.
 // ─────────────────────────────────────────────
 
 import { z } from "zod";
@@ -31,19 +30,17 @@ const currency = z
 
 export const createSalarySchema = z.object({
   shiftId: objectId.optional(),
-  employerId: objectId.optional(),
   hourlyPayRate: hourlyRate,
   rateType: rateType.optional(),
   currency: currency.optional(),
 });
 
 // ── Update ─────────────────────────────────────
-// nullable → the client can send null to detach the shift/employer link.
+// nullable → the client can send null to detach the shift link.
 
 export const updateSalarySchema = z
   .object({
     shiftId: objectId.nullable().optional(),
-    employerId: objectId.nullable().optional(),
     hourlyPayRate: hourlyRate.optional(),
     rateType: rateType.optional(),
     currency: currency.nullable().optional(),

@@ -36,18 +36,13 @@ async function buildReport(userId: string, months: number) {
   const start = new Date(end);
   start.setMonth(start.getMonth() - months);
 
-  const [shifts, wages, settings, paidMonths] = await Promise.all([
-    prisma.shift.findMany({
-      where: { userId, date: { gte: start, lte: end } },
+  // Occurrences = shift presets ASSIGNED to days in the window (each is one
+  // worked day). Everything below is derived from these, not from shift.date.
+  const [assignments, settings, paidMonths] = await Promise.all([
+    prisma.calendarEntry.findMany({
+      where: { userId, type: "shift", shiftId: { not: null }, date: { gte: start, lte: end } },
       orderBy: { date: "asc" },
-      select: { id: true, shiftName: true, shiftType: true, date: true, totalHours: true },
-    }),
-    prisma.salary.findMany({
-      where: { userId, shift: { is: { date: { gte: start, lte: end } } } },
-      include: {
-        shift: { select: { id: true, shiftName: true, shiftType: true, date: true } },
-        employer: { select: { employerName: true, store: true } },
-      },
+      select: { shiftId: true, date: true },
     }),
     prisma.userSettings.upsert({ where: { userId }, create: { userId }, update: {} }),
     prisma.paidMonth.findMany({ where: { userId } }),
@@ -56,15 +51,52 @@ async function buildReport(userId: string, months: number) {
   const currency = settings.currency;
   const nativeCurrency = settings.nativeCurrency ?? settings.currency;
 
-  // Earnings per shift (a shift can carry several wages).
-  const earnedByShift = new Map<string, number>();
-  for (const w of wages) {
-    if (!w.shiftId) continue;
-    earnedByShift.set(w.shiftId, (earnedByShift.get(w.shiftId) ?? 0) + (w.salary ?? 0));
-  }
+  // Load the presets referenced by the occurrences (with wages + employer).
+  const shiftIds = Array.from(new Set(assignments.map((a) => a.shiftId).filter(Boolean))) as string[];
+  const presets =
+    shiftIds.length > 0
+      ? await prisma.shift.findMany({
+          where: { id: { in: shiftIds } },
+          select: {
+            id: true,
+            shiftName: true,
+            shiftType: true,
+            totalHours: true,
+            salaries: { select: { salary: true, rateType: true, currency: true } },
+            employer: { select: { employerName: true, store: true } },
+          },
+        })
+      : [];
+  const presetById = new Map(presets.map((p) => [p.id, p]));
 
-  const earned = wages.reduce((s, w) => s + (w.salary ?? 0), 0);
-  const hours = shifts.reduce((s, sh) => s + (sh.totalHours ?? 0), 0);
+  // Wage total per preset (a preset may carry several wage rows).
+  const wageTotal = (p?: (typeof presets)[number]) =>
+    (p?.salaries ?? []).reduce((s, w) => s + (w.salary ?? 0), 0);
+
+  // One row per occurrence (assignment).
+  const shiftRows = assignments.map((a) => {
+    const p = presetById.get(a.shiftId as string);
+    return {
+      date: a.date.toISOString(),
+      name: p?.shiftName ?? "",
+      type: p?.shiftType ?? "",
+      hours: p?.totalHours ?? 0,
+      earned: round2(wageTotal(p)),
+    };
+  });
+  const wageRows = assignments
+    .map((a) => presetById.get(a.shiftId as string))
+    .filter((p): p is (typeof presets)[number] => !!p && (p.salaries?.length ?? 0) > 0)
+    .map((p) => ({
+      shift: p.shiftName || p.shiftType || "—",
+      employee: p.employer?.employerName ?? "—",
+      rateType: p.salaries[0]?.rateType ?? "hourly",
+      currency: p.salaries[0]?.currency ?? currency,
+      value: round2(wageTotal(p)),
+    }));
+
+  const earned = shiftRows.reduce((s, r) => s + r.earned, 0);
+  const hours = shiftRows.reduce((s, r) => s + (r.hours ?? 0), 0);
 
   // Live global → native conversion (snapshotted into the report).
   let rate: number | null = null;
@@ -97,27 +129,15 @@ async function buildReport(userId: string, months: number) {
     nativeCurrency,
     rate,
     totals: {
-      shifts: shifts.length,
+      shifts: shiftRows.length,
       hours: round2(hours),
       earned: round2(earned),
       nativeEarned,
-      wages: wages.length,
+      wages: wageRows.length,
       paidTotal: round2(payments.reduce((s, p) => s + p.amount, 0)),
     },
-    shifts: shifts.map((sh) => ({
-      date: sh.date.toISOString(),
-      name: sh.shiftName ?? "",
-      type: sh.shiftType ?? "",
-      hours: sh.totalHours ?? 0,
-      earned: round2(earnedByShift.get(sh.id) ?? 0),
-    })),
-    wages: wages.map((w) => ({
-      shift: w.shift?.shiftName || w.shift?.shiftType || "—",
-      employee: w.employer?.employerName ?? "—",
-      rateType: w.rateType ?? "hourly",
-      currency: w.currency ?? currency,
-      value: round2(w.salary ?? 0),
-    })),
+    shifts: shiftRows,
+    wages: wageRows,
     payments,
   };
 }
