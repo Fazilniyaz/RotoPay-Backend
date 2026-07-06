@@ -24,4 +24,7 @@ router.patch("/",   validate(updateSettingsSchema), settingsController.updateSet
 router.patch("/profile-picture", imageJson, settingsController.updateProfilePicture);
 router.delete("/profile-picture", settingsController.deleteProfilePicture);
 
+// Permanently delete the authenticated user's account (cascades to all data).
+router.delete("/account", settingsController.deleteAccount);
+
 export default router;

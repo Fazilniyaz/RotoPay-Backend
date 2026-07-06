@@ -21,6 +21,7 @@ import { asyncHandler } from "../helpers/async.handler";
 import { sendSuccess, sendCreated, sendNotFound, sendError } from "../helpers/api.response";
 import { CreateCalendarInput, UpdateCalendarInput } from "../helpers/calendar.validation";
 import { scheduleShiftReminder, cancelShiftReminders } from "../helpers/notification.service";
+import { resolveDefaultEmployerId, scopeEmployerId } from "../helpers/default-employer";
 
 const entryInclude = {
   shift: {
@@ -75,6 +76,10 @@ export const createCalendarEntry = asyncHandler(async (req: Request, res: Respon
     return;
   }
 
+  // Every entry belongs to an employee's calendar. When the client omits it we
+  // fall back to the default employee so nothing lands on an orphan null scope.
+  const employerId = body.employerId ?? (await resolveDefaultEmployerId(userId));
+
   const entry = await prisma.calendarEntry.create({
     data: {
       userId,
@@ -82,7 +87,7 @@ export const createCalendarEntry = asyncHandler(async (req: Request, res: Respon
       type: body.type,
       title: body.title,
       shiftId: body.shiftId ?? null,
-      employerId: body.employerId ?? null,
+      employerId,
       color: body.color ?? null,
     },
     include: entryInclude,
@@ -114,11 +119,9 @@ export const getCalendarEntries = asyncHandler(async (req: Request, res: Respons
 
   const where: Prisma.CalendarEntryWhereInput = { userId };
 
-  if (typeof req.query.employerId === "string" && req.query.employerId.trim()) {
-    where.employerId = req.query.employerId.trim();
-  } else {
-    where.employerId = null;
-  }
+  // Calendars are per-employee: an explicit ?employerId= wins, otherwise scope
+  // to the user's default employee (never the legacy null "own" calendar).
+  where.employerId = await scopeEmployerId(userId, req.query.employerId);
 
   const dateFilter: Prisma.DateTimeFilter = {};
   if (typeof req.query.from === "string") {

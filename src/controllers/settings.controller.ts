@@ -13,14 +13,16 @@ import { asyncHandler } from "../helpers/async.handler";
 import { sendSuccess, sendError } from "../helpers/api.response";
 import { UpdateSettingsInput } from "../helpers/settings.validation";
 import { uploadProfileImage, deleteImage } from "../utilities/imagekit";
+import { resolveDefaultEmployerId } from "../helpers/default-employer";
 
 async function buildPayload(userId: string) {
-  const [user, settings] = await Promise.all([
+  const [user, settings, defaultEmployerId] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
       select: { displayName: true, email: true, profilePicture: true },
     }),
     prisma.userSettings.upsert({ where: { userId }, create: { userId }, update: {} }),
+    resolveDefaultEmployerId(userId),
   ]);
   return {
     profile: {
@@ -28,6 +30,9 @@ async function buildPayload(userId: string) {
       email: user?.email ?? "",
       profilePicture: user?.profilePicture ?? null,
     },
+    // The employee that scopes calendar / earnings / reports. Null → the user
+    // has no employees yet and must complete onboarding.
+    defaultEmployerId,
     settings: {
       currency: settings.currency,
       // Falls back to the global currency when the user hasn't set a native one.
@@ -176,4 +181,39 @@ export const deleteProfilePicture = asyncHandler(async (req: Request, res: Respo
 
   const payload = await buildPayload(userId);
   sendSuccess(res, "Profile picture removed successfully", payload);
+});
+
+// ─────────────────────────────────────────────
+// DELETE — /api/settings/account
+// Permanently deletes the user's account and everything it owns. Every relation
+// is declared onDelete: Cascade, so removing the User row wipes settings,
+// employers, shifts, wages, calendar entries, clock sessions, notifications,
+// paid months, reports and sessions in one go. The profile image is cleaned up
+// from ImageKit first (best-effort) since that lives outside the database.
+// ─────────────────────────────────────────────
+
+export const deleteAccount = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+
+  const existing = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { profilePictureId: true },
+  });
+  if (!existing) {
+    return sendError(res, "Account not found", 404);
+  }
+
+  // Remove the hosted profile image before the DB row disappears. Best-effort —
+  // an orphaned ImageKit file must never block the account deletion itself.
+  if (existing.profilePictureId) {
+    try {
+      await deleteImage(existing.profilePictureId);
+    } catch (err) {
+      console.error("[Settings] Failed to delete profile picture on account deletion:", err);
+    }
+  }
+
+  await prisma.user.delete({ where: { id: userId } });
+
+  sendSuccess(res, "Account deleted successfully");
 });

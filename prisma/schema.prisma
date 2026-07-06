@@ -27,6 +27,12 @@ model User {
   pin            String?
   pinEnabled     Boolean  @default(false)
 
+  // The employee that currently scopes the per-employee modules (calendar,
+  // earnings, reports). Set to the first employer on onboarding; switchable in
+  // the Employees module. Stored as a plain id (no Prisma relation) to avoid a
+  // second User↔Employer relation clashing with `employers[]`.
+  defaultEmployerId String? @db.ObjectId
+
   // Email verification
   emailVerifyToken        String?
   emailVerifyTokenExpiry  DateTime?
@@ -83,16 +89,23 @@ model Report {
 model PaidMonth {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   userId    String   @db.ObjectId
+  // Per-employee scope: which employee this "salary received" belongs to. Null
+  // = legacy (pre-default-employee) records. New records always carry it, so
+  // Total Pay differs per employee (a fresh employee shows 0).
+  employerId String? @db.ObjectId
   year      Int
   month     Int // 1–12
   amount    Float    @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employer Employer? @relation(fields: [employerId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, year, month])
+  // One paid record per employee per month.
+  @@unique([userId, employerId, year, month])
   @@index([userId])
+  @@index([userId, employerId])
   @@map("paid_months")
 }
 
@@ -149,6 +162,8 @@ model Employer {
   salaries        Salary[]
   clockSessions   ClockSession[]
   calendarEntries CalendarEntry[]
+  // Per-employee "salary received" records (deleting the employee removes them).
+  paidMonths      PaidMonth[]
 
   @@index([userId])
   @@map("employers")

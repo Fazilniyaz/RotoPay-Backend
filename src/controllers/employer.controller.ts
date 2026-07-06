@@ -28,6 +28,7 @@ import {
   CreateEmployerInput,
   UpdateEmployerInput,
 } from "../helpers/employer.validation";
+import { resolveDefaultEmployerId } from "../helpers/default-employer";
 
 // A user may register at most this many employers.
 export const MAX_EMPLOYERS = 3;
@@ -61,7 +62,16 @@ export const createEmployer = asyncHandler(async (req: Request, res: Response) =
     },
   });
 
-  sendCreated(res, "Employer created successfully", employer);
+  // The first employee a user ever creates (onboarding) becomes the default —
+  // the one that scopes calendar / earnings / reports until they switch it.
+  if (existingCount === 0) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { defaultEmployerId: employer.id },
+    });
+  }
+
+  sendCreated(res, "Employer created successfully", { ...employer, isDefault: existingCount === 0 });
 });
 
 // ─────────────────────────────────────────────
@@ -98,12 +108,37 @@ export const getEmployers = asyncHandler(async (req: Request, res: Response) => 
     prisma.employer.count({ where }),
   ]);
 
-  sendSuccess(res, "Employers fetched successfully", employers, 200, {
+  // Resolve (and self-heal) which employee is the default, then tag each row.
+  const defaultEmployerId = await resolveDefaultEmployerId(userId);
+  const tagged = employers.map((e) => ({ ...e, isDefault: e.id === defaultEmployerId }));
+
+  sendSuccess(res, "Employers fetched successfully", tagged, 200, {
     page,
     limit,
     total,
     totalPages: Math.ceil(total / limit),
+    defaultEmployerId,
   });
+});
+
+// ─────────────────────────────────────────────
+// SET DEFAULT — PATCH /api/employers/:id/set-default
+// Makes this employee the one that scopes calendar / earnings / reports.
+// ─────────────────────────────────────────────
+
+export const setDefaultEmployer = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const { id } = req.params;
+
+  const existing = await prisma.employer.findFirst({ where: { id, userId } });
+  if (!existing) {
+    sendNotFound(res, "Employer not found");
+    return;
+  }
+
+  await prisma.user.update({ where: { id: userId }, data: { defaultEmployerId: id } });
+
+  sendSuccess(res, "Default employee updated", { ...existing, isDefault: true });
 });
 
 // ─────────────────────────────────────────────
@@ -179,5 +214,9 @@ export const deleteEmployer = asyncHandler(async (req: Request, res: Response) =
 
   await prisma.employer.delete({ where: { id } });
 
-  sendSuccess(res, "Employer deleted successfully");
+  // If the default employee was just removed, hand the default to the oldest
+  // remaining employer (or null when none are left → user is back to onboarding).
+  const defaultEmployerId = await resolveDefaultEmployerId(userId);
+
+  sendSuccess(res, "Employer deleted successfully", { defaultEmployerId });
 });

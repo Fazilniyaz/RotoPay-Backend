@@ -21,6 +21,7 @@ import { parsePagination } from "../helpers/validators";
 import { sendSuccess, sendNotFound } from "../helpers/api.response";
 import { GenerateReportInput } from "../helpers/report.validation";
 import { getRate } from "../utilities/currency";
+import { scopeEmployerId } from "../helpers/default-employer";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -30,22 +31,22 @@ const RETENTION_MONTHS = 3;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-// Compute the full report snapshot for a period.
-async function buildReport(userId: string, months: number) {
+// Compute the full report snapshot for a period, scoped to ONE employee.
+async function buildReport(userId: string, months: number, employerId: string | null) {
   const end = new Date();
   const start = new Date(end);
   start.setMonth(start.getMonth() - months);
 
-  // Occurrences = shift presets ASSIGNED to days in the window (each is one
-  // worked day). Everything below is derived from these, not from shift.date.
+  // Occurrences = shift presets ASSIGNED to this employee's days in the window
+  // (each is one worked day). Everything below is derived from these.
   const [assignments, settings, paidMonths] = await Promise.all([
     prisma.calendarEntry.findMany({
-      where: { userId, type: "shift", shiftId: { not: null }, date: { gte: start, lte: end } },
+      where: { userId, employerId, type: "shift", shiftId: { not: null }, date: { gte: start, lte: end } },
       orderBy: { date: "asc" },
       select: { shiftId: true, date: true },
     }),
     prisma.userSettings.upsert({ where: { userId }, create: { userId }, update: {} }),
-    prisma.paidMonth.findMany({ where: { userId } }),
+    prisma.paidMonth.findMany({ where: { userId, employerId } }),
   ]);
 
   const currency = settings.currency;
@@ -161,7 +162,10 @@ export const generateReport = asyncHandler(async (req: Request, res: Response) =
   }
   months = Math.min(3, Math.max(1, months));
 
-  const data = await buildReport(userId, months);
+  // Reports are per-employee: scope to the requested employer or the default.
+  const requestedEmployer = (req.body as { employerId?: unknown }).employerId ?? req.query.employerId;
+  const employerId = await scopeEmployerId(userId, requestedEmployer);
+  const data = await buildReport(userId, months, employerId);
 
   const report = await prisma.report.create({
     data: {

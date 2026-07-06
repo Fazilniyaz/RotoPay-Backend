@@ -27,6 +27,7 @@ import { parsePagination } from "../helpers/validators";
 import { sendSuccess, sendCreated, sendNotFound, sendError } from "../helpers/api.response";
 import { CreateShiftInput, UpdateShiftInput } from "../helpers/shift.validation";
 import { cancelShiftReminders } from "../helpers/notification.service";
+import { scopeEmployerId } from "../helpers/default-employer";
 
 // The preset carries its employee + each wage row's employer basic info.
 const shiftInclude = {
@@ -84,9 +85,33 @@ async function syncSalariesForShift(userId: string, shiftId: string, totalHours:
   );
 }
 
-// True if the user already has a preset for this employee with the same start/end
-// time-of-day (excludeId lets update skip the record being edited).
-async function hasDuplicatePreset(
+// Expand a time-of-day window to minutes-of-day [start, end]. Overnight windows
+// (end <= start) carry the end into the next day (+1440) so a night shift that
+// wraps past midnight still compares as one continuous interval.
+function toMinuteRange(startTime: Date, endTime: Date): [number, number] {
+  const start = minsOfDay(startTime);
+  let end = minsOfDay(endTime);
+  if (end <= start) end += 1440;
+  return [start, end];
+}
+
+// Two time-of-day windows conflict when they overlap on the clock. Touching
+// endpoints are allowed (one shift ending exactly when the next begins is fine).
+// Overnight wrap is covered by also testing the sibling shifted by ±1 day, so a
+// 22:00–06:00 window is detected against an early-morning one and vice-versa.
+function windowsOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
+  for (const offset of [-1440, 0, 1440]) {
+    if (aStart < bEnd + offset && bStart + offset < aEnd) return true;
+  }
+  return false;
+}
+
+// True if the user already has a preset for this employee whose time window
+// OVERLAPS the given one (not just an exact match). Any overlap — the new start
+// falling inside an existing window, the new end falling inside one, an existing
+// window sitting entirely inside the new one, or an exact match — is a conflict.
+// excludeId lets update skip the record being edited.
+async function hasTimeConflict(
   userId: string,
   employerId: string,
   startTime: Date,
@@ -97,9 +122,11 @@ async function hasDuplicatePreset(
     where: { userId, employerId, ...(excludeId && { id: { not: excludeId } }) },
     select: { startTime: true, endTime: true },
   });
-  const s = minsOfDay(startTime);
-  const e = minsOfDay(endTime);
-  return siblings.some((sh) => minsOfDay(sh.startTime) === s && minsOfDay(sh.endTime) === e);
+  const [aStart, aEnd] = toMinuteRange(startTime, endTime);
+  return siblings.some((sh) => {
+    const [bStart, bEnd] = toMinuteRange(sh.startTime, sh.endTime);
+    return windowsOverlap(aStart, aEnd, bStart, bEnd);
+  });
 }
 
 // ─────────────────────────────────────────────
@@ -118,10 +145,10 @@ export const createShift = asyncHandler(async (req: Request, res: Response) => {
   // Hours are the single source of truth for pay — always derived from the times.
   const totalHours = hoursBetween(body.startTime, body.endTime);
 
-  if (await hasDuplicatePreset(userId, body.employerId, body.startTime, body.endTime)) {
+  if (await hasTimeConflict(userId, body.employerId, body.startTime, body.endTime)) {
     sendError(
       res,
-      "Same shift is already allocated to this employee — change the timings or the employee.",
+      "This employee already has a shift that overlaps these timings. Shift times can't conflict for the same employee — change the timings or pick another employee.",
       409
     );
     return;
@@ -200,6 +227,8 @@ export const getShifts = asyncHandler(async (req: Request, res: Response) => {
 
 export const getShiftAnalytics = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.userId;
+  // Earnings are per-employee: scope to ?employerId= or the user's default.
+  const employerId = await scopeEmployerId(userId, req.query.employerId);
 
   const now = new Date();
   const year = now.getFullYear();
@@ -208,13 +237,19 @@ export const getShiftAnalytics = asyncHandler(async (req: Request, res: Response
   const endOfMonth = new Date(year, month, 1);
 
   const [currentPaid, monthAssignments, payTotal] = await Promise.all([
-    // Is the CURRENT month already paid? If so, its figures have reset to 0.
-    prisma.paidMonth.findUnique({ where: { userId_year_month: { userId, year, month } } }),
+    // Is the CURRENT month already paid for this employee? If so, figures reset to 0.
+    prisma.paidMonth.findFirst({ where: { userId, employerId, year, month } }),
     prisma.calendarEntry.findMany({
-      where: { userId, type: "shift", shiftId: { not: null }, date: { gte: startOfMonth, lt: endOfMonth } },
+      where: {
+        userId,
+        employerId,
+        type: "shift",
+        shiftId: { not: null },
+        date: { gte: startOfMonth, lt: endOfMonth },
+      },
       select: { shiftId: true },
     }),
-    prisma.paidMonth.aggregate({ where: { userId }, _sum: { amount: true } }),
+    prisma.paidMonth.aggregate({ where: { userId, employerId }, _sum: { amount: true } }),
   ]);
 
   // Sum this month's assignment hours + wages (skip entirely once paid).
@@ -286,15 +321,15 @@ export const updateShift = asyncHandler(async (req: Request, res: Response) => {
   const endTime = body.endTime ?? existing.endTime;
   const employerId = body.employerId ?? existing.employerId;
 
-  // Re-check the duplicate rule when timing or employee changed.
+  // Re-check the time-conflict rule when timing or employee changed.
   if (
     employerId &&
     (body.startTime !== undefined || body.endTime !== undefined || body.employerId !== undefined) &&
-    (await hasDuplicatePreset(userId, employerId, startTime, endTime, id))
+    (await hasTimeConflict(userId, employerId, startTime, endTime, id))
   ) {
     sendError(
       res,
-      "Same shift is already allocated to this employee — change the timings or the employee.",
+      "This employee already has a shift that overlaps these timings. Shift times can't conflict for the same employee — change the timings or pick another employee.",
       409
     );
     return;

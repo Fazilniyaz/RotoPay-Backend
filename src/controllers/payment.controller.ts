@@ -19,20 +19,27 @@ import { asyncHandler } from "../helpers/async.handler";
 import { sendSuccess, sendNotFound } from "../helpers/api.response";
 import { MarkPaymentInput } from "../helpers/payment.validation";
 import { emitNotification, NotificationType } from "../helpers/notification.service";
+import { scopeEmployerId } from "../helpers/default-employer";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
 
-// Sum the wage of every shift ASSIGNED to a day in the given month (per-day
-// multiplicity). Snapshotted into PaidMonth so past months keep their amount.
-async function computeMonthAmount(userId: string, year: number, month: number): Promise<number> {
+// Sum the wage of every shift ASSIGNED to a day in the given month for ONE
+// employee (per-day multiplicity). Snapshotted into PaidMonth so past months
+// keep their amount.
+async function computeMonthAmount(
+  userId: string,
+  employerId: string | null,
+  year: number,
+  month: number
+): Promise<number> {
   const start = new Date(year, month - 1, 1);
   const end = new Date(year, month, 1); // exclusive upper bound
 
   const assignments = await prisma.calendarEntry.findMany({
-    where: { userId, type: "shift", shiftId: { not: null }, date: { gte: start, lt: end } },
+    where: { userId, employerId, type: "shift", shiftId: { not: null }, date: { gte: start, lt: end } },
     select: { shiftId: true },
   });
   if (assignments.length === 0) return 0;
@@ -58,11 +65,13 @@ async function computeMonthAmount(userId: string, year: number, month: number): 
 
 export const listPaidMonths = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.userId;
+  // Paid months are per-employee: scope to ?employerId= or the default employee.
+  const employerId = await scopeEmployerId(userId, req.query.employerId);
   const months = await prisma.paidMonth.findMany({
-    where: { userId },
+    where: { userId, employerId },
     orderBy: [{ year: "desc" }, { month: "desc" }],
   });
-  sendSuccess(res, "Paid months fetched successfully", months);
+  sendSuccess(res, "Paid months fetched successfully", months, 200, { employerId });
 });
 
 // ─────────────────────────────────────────────
@@ -72,14 +81,17 @@ export const listPaidMonths = asyncHandler(async (req: Request, res: Response) =
 export const markMonthPaid = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const { year, month } = req.body as MarkPaymentInput;
+  // Marking paid is per-employee: scope to ?employerId= or the default employee.
+  const employerId = await scopeEmployerId(userId, req.body.employerId ?? req.query.employerId);
 
-  const amount = await computeMonthAmount(userId, year, month);
+  const amount = await computeMonthAmount(userId, employerId, year, month);
 
-  const record = await prisma.paidMonth.upsert({
-    where: { userId_year_month: { userId, year, month } },
-    create: { userId, year, month, amount },
-    update: { amount },
-  });
+  // employerId is nullable so we avoid findUnique on the compound key (Prisma
+  // can't target a null segment cleanly) — find-then-update-or-create instead.
+  const existing = await prisma.paidMonth.findFirst({ where: { userId, employerId, year, month } });
+  const record = existing
+    ? await prisma.paidMonth.update({ where: { id: existing.id }, data: { amount } })
+    : await prisma.paidMonth.create({ data: { userId, employerId, year, month, amount } });
 
   const settings = await prisma.userSettings.findUnique({
     where: { userId },
@@ -104,9 +116,10 @@ export const markMonthPaid = asyncHandler(async (req: Request, res: Response) =>
 export const unmarkMonthPaid = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const { year, month } = req.body as MarkPaymentInput;
+  const employerId = await scopeEmployerId(userId, req.body.employerId ?? req.query.employerId);
 
-  const existing = await prisma.paidMonth.findUnique({
-    where: { userId_year_month: { userId, year, month } },
+  const existing = await prisma.paidMonth.findFirst({
+    where: { userId, employerId, year, month },
   });
   if (!existing) {
     sendNotFound(res, "That month is not marked as paid");

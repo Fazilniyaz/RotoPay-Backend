@@ -24,6 +24,7 @@ router.use(authenticate);
 router.post("/",        validate(createEmployerSchema),                                       employerController.createEmployer);
 router.get("/",                                                                                employerController.getEmployers);
 router.get("/:id",      validateParams(idParamSchema),                                         employerController.getEmployerById);
+router.patch("/:id/set-default", validateParams(idParamSchema),                                employerController.setDefaultEmployer);
 router.patch("/:id",    validateParams(idParamSchema),  validate(updateEmployerSchema),        employerController.updateEmployer);
 router.delete("/:id",   validateParams(idParamSchema),                                         employerController.deleteEmployer);
 
