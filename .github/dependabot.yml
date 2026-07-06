@@ -1,0 +1,36 @@
+# Dependabot — automated dependency + security-update PRs.
+# Catches vulnerable third-party packages early (blueprint point 5).
+# Docs: https://docs.github.com/code-security/dependabot
+#
+# NOTE: Dependabot *security* alerts + auto security-update PRs are enabled in
+# the repo's Settings → Code security (separate from this version-update config).
+version: 2
+updates:
+  # ── Application dependencies (npm) ──
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(dev-deps)"
+    # Batch low-risk minor/patch bumps into a single PR to cut noise; security
+    # fixes still arrive as their own dedicated PRs.
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ── Keep GitHub Actions used in workflows up to date ──
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "ci"

@@ -1,0 +1,46 @@
+name: Dependency Scan
+
+# Automated dependency vulnerability scanning (blueprint point 5).
+# Runs on every push/PR, weekly, and on demand.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      # Full report for visibility (never fails the job — shows every severity).
+      - name: Audit report
+        run: npm audit || true
+      # Gate: fail the check only on CRITICAL vulnerabilities, so pre-existing
+      # moderate/high issues don't block work while Dependabot fixes them.
+      - name: Fail on critical
+        run: npm audit --audit-level=critical
+
+  snyk:
+    name: Snyk (optional)
+    runs-on: ubuntu-latest
+    # Maps the secret to env so the step can skip cleanly when it isn't set.
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Snyk
+        if: ${{ env.SNYK_TOKEN != '' }}
+        uses: snyk/actions/node@master
+        with:
+          args: --severity-threshold=high

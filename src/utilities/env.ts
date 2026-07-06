@@ -110,4 +110,12 @@ export const env = {
     "APPLE_APP_ATTEST_ROOT_CA_PATH",
     "certs/Apple_App_Attestation_Root_CA.pem"
   ),
+
+  // ── reCAPTCHA v3 (web bot mitigation, blueprint point 4) ──
+  // When enforced, web clients must send a valid reCAPTCHA token on the sensitive
+  // auth endpoints (mobile uses App Attestation instead). Off by default so dev
+  // and un-keyed environments keep working.
+  RECAPTCHA_ENFORCED: optionalEnv("RECAPTCHA_ENFORCED", "false") === "true",
+  RECAPTCHA_SECRET_KEY: optionalEnv("RECAPTCHA_SECRET_KEY", ""),
+  RECAPTCHA_MIN_SCORE: parseFloat(optionalEnv("RECAPTCHA_MIN_SCORE", "0.5")),
 } as const;

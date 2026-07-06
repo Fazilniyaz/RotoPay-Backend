@@ -26,6 +26,7 @@ import currencyRouter from "./routes/currency.router";
 import notificationRouter from "./routes/notification.router";
 import reportRouter from "./routes/report.router";
 import attestationRouter from "./routes/attestation.router";
+import configRouter from "./routes/config.router";
 
 // ─────────────────────────────────────────────
 
@@ -52,7 +53,7 @@ app.use(
         : [env.CLIENT_URL, "http://localhost:8081", "http://192.168.0.102:8081", "http://localhost:3000", "https://roto-pay-admin-web-app.vercel.app"],
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Client"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Client", "X-Recaptcha-Token", "X-Attestation-Token"],
   })
 );
 
@@ -103,6 +104,7 @@ app.use("/api/currency", currencyRouter);
 app.use("/api/notifications", notificationRouter);
 app.use("/api/reports", reportRouter);
 app.use("/api/attestation", attestationRouter);
+app.use("/api/config", configRouter);
 
 // Future routes will be added here:
 // app.use("/api/users", userRouter);

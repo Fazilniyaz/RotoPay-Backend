@@ -18,22 +18,24 @@ import {
   refreshTokenSchema,
 } from "../helpers/auth.validation";
 import { authLimiter, resendEmailLimiter } from "../middlewares/rate.limiter";
+import { recaptchaGuard } from "../middlewares/recaptcha.middleware";
 import { authenticate } from "../middlewares/auth.middleware";
 
 const router = Router();
 
 // ── Phase 1 (existing) ─────────────────────────────────────────
+// Chain: rate limiter → reCAPTCHA (web only) → validator → controller
 
-router.post("/register",              authLimiter,        validate(registerSchema),             authController.register);
-router.post("/login",                 authLimiter,        validate(loginSchema),                authController.login);
+router.post("/register",              authLimiter,        recaptchaGuard("register"),        validate(registerSchema),             authController.register);
+router.post("/login",                 authLimiter,        recaptchaGuard("login"),           validate(loginSchema),                authController.login);
 router.post("/google",                authLimiter,        validate(googleAuthSchema),           authController.googleAuth);
 router.post("/verify-email",                              validate(verifyEmailSchema),          authController.verifyEmail);
-router.post("/resend-verification",   resendEmailLimiter, validate(resendVerificationSchema),   authController.resendVerification);
+router.post("/resend-verification",   resendEmailLimiter, recaptchaGuard("resend"),          validate(resendVerificationSchema),   authController.resendVerification);
 
 // ── Phase 2 (new) ──────────────────────────────────────────────
 
 // Forgot password — rate limited (same as auth), validated, no auth required
-router.post("/forgot-password",       resendEmailLimiter, validate(forgotPasswordSchema),       authController.forgotPassword);
+router.post("/forgot-password",       resendEmailLimiter, recaptchaGuard("forgot_password"), validate(forgotPasswordSchema),       authController.forgotPassword);
 
 // Reset password — validated, no auth required (user doesn't have a token yet)
 router.post("/reset-password",                            validate(resetPasswordSchema),        authController.resetPassword);
