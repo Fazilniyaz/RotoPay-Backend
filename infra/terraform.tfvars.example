@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is git-ignored.
+
+project_id             = "your-gcp-project-id"
+region                 = "us-central1"
+cloud_run_service_name = "rotopay-backend"      # the Cloud Run service running the API
+domain                 = "api.rotopay.com"      # a managed TLS cert is issued for this
+
+# ── Cloud Armor tuning (optional — sensible defaults exist) ──
+# waf_sensitivity  = 1     # raise to 2+ only after tuning out false positives
+# auth_rate_count  = 10    # login/register/google requests per IP per minute
+# otp_rate_count   = 5     # verify/resend/forgot/reset per IP per minute
+# enable_recaptcha = false # turn on only once the web forms send reCAPTCHA tokens

@@ -10,6 +10,7 @@ import cors from "cors";
 import morgan from "morgan";
 import { env } from "./utilities/env";
 import { apiLimiter } from "./middlewares/rate.limiter";
+import { attestationGuard } from "./middlewares/attestation.middleware";
 import { errorHandler, notFoundHandler } from "./middlewares/error.middleware";
 
 // ── Import Routers ─────────────────────────────
@@ -24,10 +25,22 @@ import paymentRouter from "./routes/payment.router";
 import currencyRouter from "./routes/currency.router";
 import notificationRouter from "./routes/notification.router";
 import reportRouter from "./routes/report.router";
+import attestationRouter from "./routes/attestation.router";
 
 // ─────────────────────────────────────────────
 
 const app: Application = express();
+
+// ── Trust the reverse proxy (GCP HTTPS Load Balancer / Cloud Armor) ──────────
+// Behind the load balancer every request's connection IP is the LB's, and the
+// caller's real IP arrives in the X-Forwarded-For header. Trusting the exact
+// number of proxy hops restores the real client IP on `req.ip`, so the rate
+// limiter, morgan logs and any IP-based logic act on the actual caller. We set a
+// NUMBER (not `true`) so only our own LB's hop is trusted — a spoofed
+// X-Forwarded-For from further upstream is ignored. See env.TRUST_PROXY.
+if (env.TRUST_PROXY > 0) {
+  app.set("trust proxy", env.TRUST_PROXY);
+}
 
 // ── Security Headers ───────────────────────────
 app.use(helmet());
@@ -61,6 +74,12 @@ if (env.NODE_ENV !== "test") {
 // ── Global Rate Limiter ────────────────────────
 app.use("/api", apiLimiter);
 
+// ── App Attestation guard ──────────────────────
+// Zero-trust: when enforced, mobile binaries must prove they're genuine (via the
+// attestation handshake) before any /api route is served. No-op until
+// ATTESTATION_ENFORCED=true; self-skips the handshake + web clients.
+app.use("/api", attestationGuard);
+
 // ── Health Check ──────────────────────────────
 app.get("/health", (_req, res) => {
   res.status(200).json({
@@ -83,6 +102,7 @@ app.use("/api/payments", paymentRouter);
 app.use("/api/currency", currencyRouter);
 app.use("/api/notifications", notificationRouter);
 app.use("/api/reports", reportRouter);
+app.use("/api/attestation", attestationRouter);
 
 // Future routes will be added here:
 // app.use("/api/users", userRouter);

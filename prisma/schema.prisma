@@ -350,3 +350,27 @@ model Session {
   @@index([expiresAt])
   @@map("sessions")
 }
+
+// ──────────────── APP ATTEST KEY (iOS) ────────────────
+// One record per iOS App Attest hardware key (Secure Enclave). Created during
+// the attestation handshake; every later assertion is verified against the
+// stored public key, and `signCount` is monotonically increased to detect
+// replay/cloning. Device-level (may exist before the user logs in), so userId
+// is optional.
+
+model AppAttestKey {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  // Apple's key identifier (base64) — unique per hardware key.
+  keyId     String   @unique
+  // Attested public key in PEM (SPKI) form — used to verify future assertions.
+  publicKey String
+  // Monotonic counter; each assertion must exceed the stored value.
+  signCount Int      @default(0)
+  bundleId  String?
+  userId    String?  @db.ObjectId
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("app_attest_keys")
+}
