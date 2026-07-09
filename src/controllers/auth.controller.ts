@@ -217,6 +217,8 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
       pinEnabled: true,
       googleId: true,
       createdAt: true,
+      failedLoginCount: true,
+      lockedUntil: true,
     },
   });
 
@@ -226,10 +228,47 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
 
   const isPasswordValid = await bcrypt.compare(password, passwordToCompare);
 
+  // ── Account lockout (brute-force / credential-stuffing defense) ──
+  // Per-account, DB-backed so it holds across IPs AND serverless instances —
+  // something the per-IP rate limiter can't do against a botnet targeting one
+  // account. Lenient enough that a real user fumbling their password is unaffected.
+  const MAX_FAILED = 8; // consecutive failures before a temporary lock
+  const LOCK_MINUTES = 15;
+
+  if (user?.lockedUntil && user.lockedUntil > new Date()) {
+    const mins = Math.max(1, Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60_000));
+    return sendError(
+      res,
+      `Too many failed attempts. Please try again in ${mins} minute${mins === 1 ? "" : "s"}.`,
+      429
+    );
+  }
+
   // ── 2. Validate credentials ────────────────────
 
   if (!user || !isPasswordValid) {
+    // Count the failure against the account (only possible when it exists) and
+    // lock it once the threshold is hit. Best-effort — never blocks the response.
+    if (user) {
+      const nextCount = (user.failedLoginCount ?? 0) + 1;
+      const lock = nextCount >= MAX_FAILED;
+      prisma.user
+        .update({
+          where: { id: user.id },
+          data: lock
+            ? { failedLoginCount: 0, lockedUntil: new Date(Date.now() + LOCK_MINUTES * 60_000) }
+            : { failedLoginCount: nextCount },
+        })
+        .catch(() => undefined);
+    }
     return sendError(res, "Invalid email or password", 401);
+  }
+
+  // Credentials are valid → clear any accumulated failed-attempt / lock state.
+  if (user.failedLoginCount || user.lockedUntil) {
+    prisma.user
+      .update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil: null } })
+      .catch(() => undefined);
   }
 
   // ── 3. Handle Google-only accounts ────────────

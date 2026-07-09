@@ -8,6 +8,7 @@ import { env } from "./utilities/env";
 import { prisma } from "./utilities/prisma.client";
 import { verifyMailerConnection } from "./utilities/mailer";
 import { startScheduler } from "./services/scheduler.service";
+import { initMongoRateStore } from "./middlewares/mongo.rate.store";
 import app from "./app";
 
 async function startServer(): Promise<void> {
@@ -22,6 +23,11 @@ async function startServer(): Promise<void> {
 
     // ── 3. Start background scheduler (auto clock-in/out, reminders) ──
     startScheduler();
+
+    // ── 3b. Ensure the rate-limit TTL index exists (auto-purges old windows) ──
+    initMongoRateStore().then((ok) =>
+      console.log(ok ? " [Server] Rate-limit store ready (MongoDB)" : " [Server] Rate-limit TTL index skipped")
+    );
 
     // ── 4. Start Express ──────────────────────────
     const server = app.listen(env.PORT, () => {

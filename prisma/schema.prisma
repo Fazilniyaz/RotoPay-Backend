@@ -41,6 +41,13 @@ model User {
   passwordResetToken        String?
   passwordResetTokenExpiry  DateTime?
 
+  // Brute-force / credential-stuffing defense (per-account, works across IPs and
+  // serverless instances since it lives in the DB). Counts consecutive failed
+  // logins; after a threshold the account locks until `lockedUntil`. Both reset
+  // on a successful login. Optional so existing users read fine.
+  failedLoginCount Int       @default(0)
+  lockedUntil      DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
